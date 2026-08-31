@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kubernetes Troubleshooting Tool — Product Architecture & Publication Blueprint</title>
+<style>
+  :root {
+    --bg: #0b1020;
+    --panel: #111831;
+    --panel-2: #151f3e;
+    --text: #edf2ff;
+    --muted: #9aa8c7;
+    --line: #27345c;
+    --accent: #7aa2ff;
+    --accent-2: #4f7cff;
+    --green: #53d18b;
+    --amber: #f4c15d;
+    --red: #ff7b7b;
+    --cyan: #65d3e3;
+    --code: #090d18;
+    --shadow: 0 18px 50px rgba(0,0,0,.28);
+  }
+  [data-theme="light"] {
+    --bg: #f5f7fb;
+    --panel: #ffffff;
+    --panel-2: #f1f5ff;
+    --text: #172033;
+    --muted: #66718a;
+    --line: #dbe3f2;
+    --accent: #315bd6;
+    --accent-2: #2449b6;
+    --green: #1d9b61;
+    --amber: #a66d09;
+    --red: #c24141;
+    --cyan: #137f91;
+    --code: #eef2f8;
+    --shadow: 0 14px 36px rgba(26,42,78,.10);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: auto; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+
+  .layout { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 290px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 22px 16px 24px;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    flex: 0 0 auto;
+  }
+  .brand {
+    padding: 4px 10px 18px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 14px;
+  }
+  .brand .eyebrow { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+  .brand h1 { font-size: 18px; line-height: 1.25; margin: 7px 0 0; }
+  .brand p { color: var(--muted); font-size: 12px; margin: 7px 0 0; }
+
+  .nav-section { margin: 14px 0 4px; color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; padding: 0 10px; }
+  .nav a {
+    display: block;
+    padding: 8px 10px;
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 650;
+  }
+  .nav a:hover, .nav a.active { background: var(--panel-2); color: var(--accent); text-decoration: none; }
+
+  .sidebar-footer {
+    margin-top: 22px;
+    padding: 14px 10px 0;
+    border-top: 1px solid var(--line);
+  }
+  .theme-btn {
+    width: 100%;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 9px 10px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .content {
+    width: 100%;
+    min-width: 0;
+    padding: 34px 42px 80px;
+  }
+  .hero {
+    max-width: 1180px;
+    margin: 0 auto 28px;
+    padding: 30px;
+    background:
+      radial-gradient(circle at 88% 10%, rgba(122,162,255,.20), transparent 28%),
+      linear-gradient(145deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+  }
+  .hero .kicker { color: var(--accent); text-transform: uppercase; letter-spacing: .12em; font-size: 12px; font-weight: 800; }
+  .hero h2 { margin: 8px 0 10px; font-size: clamp(28px, 4vw, 44px); line-height: 1.15; letter-spacing: -.02em; }
+  .hero p { margin: 0; max-width: 900px; font-size: 16px; color: var(--muted); }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0,1fr));
+    gap: 12px;
+    margin-top: 22px;
+  }
+  .hero-stat {
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(255,255,255,.025);
+  }
+  .hero-stat strong { display:block; font-size: 16px; }
+  .hero-stat span { color: var(--muted); font-size: 12px; }
+
+  section {
+    max-width: 1180px;
+    margin: 24px auto;
+    scroll-margin-top: 20px;
+  }
+  .section-head { margin-bottom: 12px; }
+  .section-head .label { color: var(--accent); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; }
+  .section-head h3 { font-size: 27px; margin: 4px 0 7px; line-height: 1.2; }
+  .section-head p { margin: 0; color: var(--muted); max-width: 920px; }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px;
+    margin: 12px 0;
+    box-shadow: 0 8px 24px rgba(0,0,0,.06);
+  }
+  .card h4 { margin: 0 0 8px; font-size: 17px; }
+  .card p:last-child { margin-bottom: 0; }
+
+  .callout {
+    border-left: 4px solid var(--accent);
+    background: var(--panel-2);
+    padding: 14px 16px;
+    border-radius: 10px;
+    margin: 14px 0;
+  }
+  .callout strong { color: var(--accent); }
+  .callout.warn { border-left-color: var(--amber); }
+  .callout.warn strong { color: var(--amber); }
+  .callout.good { border-left-color: var(--green); }
+  .callout.good strong { color: var(--green); }
+  .callout.bad { border-left-color: var(--red); }
+  .callout.bad strong { color: var(--red); }
+
+  .grid-2 { display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+  .grid-3 { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; }
+  .grid-4 { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px; }
+
+  .mini {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .mini h4 { margin:0 0 6px; font-size: 15px; }
+  .mini p, .mini li { color: var(--muted); font-size: 13px; }
+
+  .pill {
+    display:inline-block;
+    border-radius: 999px;
+    padding: 3px 9px;
+    font-size: 11px;
+    font-weight: 800;
+    margin: 2px 4px 2px 0;
+  }
+  .pill.blue { color: var(--accent); background: rgba(122,162,255,.13); }
+  .pill.green { color: var(--green); background: rgba(83,209,139,.13); }
+  .pill.amber { color: var(--amber); background: rgba(244,193,93,.13); }
+  .pill.red { color: var(--red); background: rgba(255,123,123,.13); }
+  .pill.cyan { color: var(--cyan); background: rgba(101,211,227,.13); }
+
+  .diagram {
+    background: var(--code);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px;
+    overflow-x: auto;
+    white-space: pre;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text);
+    margin: 12px 0;
+  }
+
+  pre {
+    background: var(--code);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    overflow:auto;
+    font-size: 12px;
+    line-height:1.55;
+    margin: 10px 0 0;
+  }
+
+  table {
+    width:100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+    font-size: 13px;
+  }
+  th, td {
+    border-bottom: 1px solid var(--line);
+    padding: 10px 12px;
+    text-align:left;
+    vertical-align:top;
+  }
+  th { color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: .08em; }
+  tr:last-child td { border-bottom: 0; }
+  .table-wrap { overflow-x:auto; }
+
+  ul, ol { padding-left: 22px; }
+  li { margin: 5px 0; }
+  .muted { color: var(--muted); }
+  .good-text { color: var(--green); font-weight: 700; }
+  .warn-text { color: var(--amber); font-weight: 700; }
+  .bad-text { color: var(--red); font-weight: 700; }
+
+  .flow {
+    display:grid;
+    grid-template-columns: repeat(5,minmax(0,1fr));
+    gap: 10px;
+    align-items: stretch;
+  }
+  .flow .step {
+    border:1px solid var(--line);
+    background: var(--panel);
+    border-radius:12px;
+    padding:14px;
+    position:relative;
+  }
+  .flow .step:not(:last-child)::after {
+    content:"→";
+    position:absolute;
+    right:-11px;
+    top:50%;
+    transform:translateY(-50%);
+    color:var(--accent);
+    font-weight:900;
+    z-index:2;
+  }
+  .step .n { color:var(--accent); font-size:10px; font-weight:900; letter-spacing:.1em; }
+  .step strong { display:block; margin-top:4px; }
+  .step span { display:block; margin-top:4px; color:var(--muted); font-size:12px; }
+
+  .checklist { list-style:none; padding-left:0; }
+  .checklist li { padding-left:26px; position:relative; margin:8px 0; }
+  .checklist li::before { content:"✓"; position:absolute; left:0; color:var(--green); font-weight:900; }
+
+  .footer-note {
+    max-width:1180px;
+    margin: 34px auto 0;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  @media (max-width: 980px) {
+    .sidebar { display:none; }
+    .content { padding: 22px 18px 60px; }
+    .hero-grid, .grid-4 { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .grid-3 { grid-template-columns: 1fr; }
+    .flow { grid-template-columns: 1fr; }
+    .flow .step:not(:last-child)::after { content:"↓"; right:auto; left:50%; top:auto; bottom:-18px; transform:translateX(-50%); }
+  }
+  @media (max-width: 640px) {
+    .grid-2, .hero-grid, .grid-4 { grid-template-columns: 1fr; }
+    .hero { padding:22px; }
+    .content { padding: 16px 12px 48px; }
+  }
+  @media print {
+    .sidebar, .theme-btn { display:none !important; }
+    .content { padding:0; }
+    body { background:white; color:black; }
+    .card, .mini, .hero, .diagram, pre { box-shadow:none; break-inside:avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="eyebrow">Reference Architecture</div>
+      <h1>Kubernetes Troubleshooting Tool</h1>
+      <p>From local HTML utility to open-source, single-binary product and publishable systems artifact.</p>
+    </div>
+
+    <nav class="nav" id="nav">
+      <div class="nav-section">Foundation</div>
+      <a href="#executive-summary">Executive Summary</a>
+      <a href="#current-state">Current State</a>
+      <a href="#product-thesis">Product Thesis</a>
+
+      <div class="nav-section">Product</div>
+      <a href="#target-architecture">Target Architecture</a>
+      <a href="#nodes">Nodes</a>
+      <a href="#workloads">Workloads</a>
+      <a href="#troubleshoot">Troubleshoot</a>
+      <a href="#relationship-model">Relationship Model</a>
+      <a href="#logging">Logging</a>
+
+      <div class="nav-section">Engineering</div>
+      <a href="#genericization">Remove App-Specific Logic</a>
+      <a href="#repo-structure">Go Repository Structure</a>
+      <a href="#api-design">Backend API</a>
+      <a href="#security">Security & RBAC</a>
+      <a href="#packaging">Packaging & Homebrew</a>
+      <a href="#roadmap">Version Roadmap</a>
+
+      <div class="nav-section">Publication</div>
+      <a href="#paper-positioning">Paper Positioning</a>
+      <a href="#evaluation">Evaluation Plan</a>
+      <a href="#acceptance">What Makes It Publishable</a>
+      <a href="#next-steps">Recommended Next Steps</a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button class="theme-btn" id="themeBtn">Toggle light / dark</button>
+    </div>
+  </aside>
+
+  <main class="content">
+    <div class="hero">
+      <div class="kicker">Product + Engineering + Publication Blueprint</div>
+      <h2>Turn the existing Kubernetes dashboard into a real open-source troubleshooting tool</h2>
+      <p>
+        The current implementation is already a functioning Kubernetes operations dashboard. The main transformation is not a frontend rewrite:
+        it is replacing the local shell/Python/proxy runtime with a single Go binary, generalizing application-specific assumptions, and
+        strengthening the relationship-aware troubleshooting and capacity-diagnosis story.
+      </p>
+      <div class="hero-grid">
+        <div class="hero-stat"><strong>Keep</strong><span>Existing HTML/CSS/JS and core UX</span></div>
+        <div class="hero-stat"><strong>Replace</strong><span>kubectl proxy + Python helper + start.sh</span></div>
+        <div class="hero-stat"><strong>Build</strong><span>Go backend + client-go + embedded UI</span></div>
+        <div class="hero-stat"><strong>Publish</strong><span>GitHub release + Homebrew + evaluation</span></div>
+      </div>
+    </div>
+
+    <section id="executive-summary">
+      <div class="section-head">
+        <div class="label">01 — Foundation</div>
+        <h3>Executive Summary</h3>
+        <p>The product should become a local, browser-based Kubernetes troubleshooting application installed as a single binary.</p>
+      </div>
+      <div class="callout good">
+        <strong>Core recommendation:</strong> Preserve the current UI and workflow. Replace the helper processes underneath it with one Go process that serves the UI and talks directly to Kubernetes using client-go.
+      </div>
+      <div class="diagram">brew install &lt;owner&gt;/tap/&lt;tool&gt;
+             │
+             ▼
+          &lt;tool&gt;
+             │
+   ┌─────────┴──────────┐
+   │                    │
+Embedded Web UI      Go Backend
+   │                    │
+   └──── localhost ─────┤
+                        │
+                    client-go
+                        │
+                 ~/.kube/config
+                        │
+                        ▼
+                Kubernetes API</div>
+    </section>
+
+    <section id="current-state">
+      <div class="section-head">
+        <div class="label">02 — Foundation</div>
+        <h3>Current State</h3>
+        <p>The current dashboard is already a real operational tool, but its runtime is split across multiple local processes.</p>
+      </div>
+      <div class="grid-3">
+        <div class="mini">
+          <h4>HTML Dashboard</h4>
+          <p>Nodes, workloads, troubleshooting, resource usage, logs, events, describe-style summaries, workload navigation and destructive actions.</p>
+        </div>
+        <div class="mini">
+          <h4>kubectl proxy</h4>
+          <p>Serves the static HTML and proxies browser requests to the Kubernetes API.</p>
+        </div>
+        <div class="mini">
+          <h4>Python Log Helper</h4>
+          <p>Uses <code>kubectl exec</code> to tail files written inside containers that are not available through normal stdout logs.</p>
+        </div>
+      </div>
+      <div class="diagram">start.sh
+   │
+   ├── kubectl proxy :8001
+   │      ├── serves dashboard HTML
+   │      └── proxies Kubernetes REST API
+   │
+   └── Python helper :8002
+          └── kubectl exec → tail files inside containers</div>
+      <div class="callout warn">
+        <strong>Why this still feels like a utility:</strong> the user must have multiple runtimes and processes present, ports are exposed separately, the HTML directly understands Kubernetes API paths, and the application contains environment-specific assumptions.
+      </div>
+    </section>
+
+    <section id="product-thesis">
+      <div class="section-head">
+        <div class="label">03 — Foundation</div>
+        <h3>Product Thesis</h3>
+        <p>The differentiation should not be “another Kubernetes dashboard.” It should be troubleshooting through relationships and operational context.</p>
+      </div>
+      <div class="card">
+        <h4>Proposed product promise</h4>
+        <div class="callout">
+          <strong>Understand what is happening in a Kubernetes cluster by moving naturally between workload, pod, node, runtime usage, events and logs without reconstructing the topology manually.</strong>
+        </div>
+        <p class="muted">This is a stronger identity than a generic resource browser because the tool explains how Kubernetes objects relate and how those relationships contribute to failures or wasted capacity.</p>
+      </div>
+    </section>
+
+    <section id="target-architecture">
+      <div class="section-head">
+        <div class="label">04 — Product</div>
+        <h3>Target Product Architecture</h3>
+        <p>One local executable, one local HTTP server, one Kubernetes client, one embedded frontend.</p>
+      </div>
+      <div class="diagram">User Browser
+    │
+    │ http://127.0.0.1:7777
+    ▼
+┌───────────────────────────────────────────┐
+│                Go Binary                  │
+│                                           │
+│  ┌─────────────────────────────────────┐  │
+│  │ Embedded HTML / CSS / JavaScript   │  │
+│  └─────────────────────────────────────┘  │
+│                    │                      │
+│  ┌─────────────────▼──────────────────┐   │
+│  │ Local REST / Streaming API        │   │
+│  └─────────────────┬──────────────────┘   │
+│                    │                      │
+│  ┌─────────────────▼──────────────────┐   │
+│  │ Kubernetes Service Layer          │   │
+│  │ nodes / pods / workloads / logs   │   │
+│  │ events / metrics / exec / graph   │   │
+│  └─────────────────┬──────────────────┘   │
+│                    │                      │
+│                 client-go                 │
+└────────────────────┼──────────────────────┘
+                     │
+              existing kubeconfig
+                     │
+                     ▼
+              Kubernetes API Server</div>
+
+      <div class="grid-4">
+        <div class="mini"><h4>No cluster install</h4><p>Runs locally and uses the operator's existing credentials.</p></div>
+        <div class="mini"><h4>No Python</h4><p>File-log retrieval and exec move into the Go backend.</p></div>
+        <div class="mini"><h4>No kubectl proxy</h4><p>Go talks to Kubernetes directly through client-go.</p></div>
+        <div class="mini"><h4>No frontend rebuild</h4><p>Existing HTML remains the first product UI.</p></div>
+      </div>
+    </section>
+
+    <section id="nodes">
+      <div class="section-head">
+        <div class="label">05 — Product</div>
+        <h3>Nodes</h3>
+        <p>The Nodes view should remain one of the strongest differentiators because it combines scheduling reservations with actual runtime usage.</p>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h4>Cluster-wide node view</h4>
+          <ul>
+            <li>Ready / NotReady status</li>
+            <li>Node age and instance type</li>
+            <li>CPU requests vs limits vs allocatable</li>
+            <li>Memory requests vs limits vs allocatable</li>
+            <li>Pod count and pod capacity</li>
+            <li>Metrics availability detection</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>Per-node diagnostic view</h4>
+          <ul>
+            <li>Pods running on the selected node</li>
+            <li>Per-pod CPU and memory requests</li>
+            <li>Actual CPU and memory usage</li>
+            <li>Reserved-but-idle capacity</li>
+            <li>QoS class and restart counts</li>
+            <li>Sort by usage, request or waste</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout good">
+        <strong>Research-worthy angle:</strong> requested resources influence scheduling even when they are not actually consumed. Making the difference between “reserved” and “used” immediately visible can expose stranded cluster capacity.
+      </div>
+      <div class="diagram">Node allocatable CPU:     8.0 cores
+Requested by pods:        6.4 cores
+Actually used:            2.1 cores
+                         ─────────
+Reserved but idle:        4.3 cores</div>
+    </section>
+
+    <section id="workloads">
+      <div class="section-head">
+        <div class="label">06 — Product</div>
+        <h3>Workloads</h3>
+        <p>Workloads should be a relationship browser, not just a collection of Kubernetes tables.</p>
+      </div>
+      <div class="grid-4">
+        <div class="mini"><h4>Deployments</h4><p>Replicas, availability, update state, owner relationships and pod drill-down.</p></div>
+        <div class="mini"><h4>ReplicaSets</h4><p>Intermediate ownership layer used to connect Deployment → Pod correctly.</p></div>
+        <div class="mini"><h4>DaemonSets</h4><p>Desired/current/ready counts and node-level coverage.</p></div>
+        <div class="mini"><h4>Pods</h4><p>Readiness, status, restarts, node, containers, logs and events.</p></div>
+      </div>
+
+      <div class="diagram">Deployment
+    │
+    └── ReplicaSet
+          │
+          ├── Pod A ─────► Node 1
+          │
+          ├── Pod B ─────► Node 2
+          │
+          └── Pod C ─────► Node 3
+
+DaemonSet
+    │
+    ├── Pod D ───────────► Node 1
+    ├── Pod E ───────────► Node 2
+    └── Pod F ───────────► Node 3</div>
+    </section>
+
+    <section id="troubleshoot">
+      <div class="section-head">
+        <div class="label">07 — Product</div>
+        <h3>Troubleshoot</h3>
+        <p>This view should become the operator workflow: select the thing that looks wrong and progressively expose the evidence required to diagnose it.</p>
+      </div>
+      <div class="flow">
+        <div class="step"><div class="n">STEP 1</div><strong>Choose context</strong><span>Cluster / namespace / workload</span></div>
+        <div class="step"><div class="n">STEP 2</div><strong>Inspect pods</strong><span>Ready, status, restarts, last exit</span></div>
+        <div class="step"><div class="n">STEP 3</div><strong>Inspect events</strong><span>Scheduling, probes, image pulls, warnings</span></div>
+        <div class="step"><div class="n">STEP 4</div><strong>Inspect logs</strong><span>stdout or optional file-backed logs</span></div>
+        <div class="step"><div class="n">STEP 5</div><strong>Take action</strong><span>Copy command, restart pod, guarded write</span></div>
+      </div>
+      <div class="card">
+        <h4>Keep these capabilities</h4>
+        <span class="pill blue">Describe workload</span>
+        <span class="pill blue">Describe pod</span>
+        <span class="pill cyan">Events</span>
+        <span class="pill cyan">Logs</span>
+        <span class="pill amber">Restart / delete pod</span>
+        <span class="pill red">Guarded destructive actions</span>
+        <span class="pill green">Copyable kubectl equivalent</span>
+      </div>
+    </section>
+
+    <section id="relationship-model">
+      <div class="section-head">
+        <div class="label">08 — Product</div>
+        <h3>Relationship-Aware Model</h3>
+        <p>This should become a first-class backend concept rather than a set of frontend filters.</p>
+      </div>
+      <div class="diagram">Ingress
+   │
+   ▼
+Service
+   │ selector
+   ▼
+Deployment
+   │ owns
+   ▼
+ReplicaSet
+   │ owns
+   ▼
+Pod
+   │ scheduled on
+   ▼
+Node
+
+Additional evidence linked to the same object:
+Pod ──► Containers
+Pod ──► Events
+Pod ──► Logs
+Pod ──► Metrics
+Pod ──► Last termination reason
+Pod ──► Volume / PVC relationships
+</div>
+      <div class="card">
+        <h4>Recommended backend abstraction</h4>
+        <p>Create a graph/relationship package that resolves Kubernetes ownership and placement once, then lets every UI view consume the same normalized relationships.</p>
+        <pre>type RelationshipGraph struct {
+    Deployments map[UID]*DeploymentNode
+    ReplicaSets map[UID]*ReplicaSetNode
+    DaemonSets  map[UID]*DaemonSetNode
+    Pods        map[UID]*PodNode
+    Nodes       map[string]*NodeNode
+}</pre>
+      </div>
+    </section>
+
+    <section id="logging">
+      <div class="section-head">
+        <div class="label">09 — Product</div>
+        <h3>Logging Architecture</h3>
+        <p>Standard Kubernetes logs and optional file-backed logs should both be handled by the Go backend.</p>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h4>stdout / stderr</h4>
+          <div class="diagram">Browser
+  │
+  ▼
+GET /api/logs
+  │
+  ▼
+Go
+  │
+  ▼
+Pods(namespace).GetLogs(...)
+  │
+  ▼
+Kubernetes API</div>
+        </div>
+        <div class="card">
+          <h4>File-backed logs</h4>
+          <div class="diagram">Browser
+  │
+  ▼
+GET /api/file-logs
+  │
+  ▼
+Go
+  │
+  ▼
+Kubernetes exec API
+  │
+  ▼
+tail /configured/path.log</div>
+        </div>
+      </div>
+      <div class="callout">
+        <strong>Later improvement:</strong> replace 3-second polling for stdout logs with Server-Sent Events or WebSocket streaming backed by the Kubernetes log stream.
+      </div>
+    </section>
+
+    <section id="genericization">
+      <div class="section-head">
+        <div class="label">10 — Engineering</div>
+        <h3>Remove Application-Specific Logic</h3>
+        <p>The open-source product must not encode one application's naming or log conventions.</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Current assumption</th><th>Open-source replacement</th></tr></thead>
+          <tbody>
+            <tr><td>Specific pod-name prefix</td><td>Optional configurable filters by namespace, label, annotation or prefix</td></tr>
+            <tr><td>Specific application log filenames</td><td>User-configurable file log paths, disabled by default</td></tr>
+            <tr><td>Environment-specific default namespace</td><td>No environment-specific default; remember last local selection</td></tr>
+            <tr><td>App vs Other split based on one prefix</td><td>Generic grouping by labels, workload ownership or user-defined filters</td></tr>
+            <tr><td>Product copy mentions one application</td><td>Generic Kubernetes terminology only</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h4>Example configuration</h4>
+        <pre>server:
+  port: 7777
+
+filters:
+  podPrefixes: []
+  labels: {}
+
+fileLogs:
+  enabled: false
+  paths: []
+
+safety:
+  readOnlyByDefault: true</pre>
+      </div>
+    </section>
+
+    <section id="repo-structure">
+      <div class="section-head">
+        <div class="label">11 — Engineering</div>
+        <h3>Go Repository Structure</h3>
+        <p>The codebase should make Kubernetes access, API serving, graph logic and frontend assets independently testable.</p>
+      </div>
+      <pre>kubeops/
+│
+├── cmd/
+│   └── kubeops/
+│       └── main.go
+│
+├── internal/
+│   ├── kube/
+│   │   ├── client.go
+│   │   ├── context.go
+│   │   ├── namespaces.go
+│   │   ├── nodes.go
+│   │   ├── deployments.go
+│   │   ├── daemonsets.go
+│   │   ├── replicasets.go
+│   │   ├── pods.go
+│   │   ├── metrics.go
+│   │   ├── events.go
+│   │   ├── logs.go
+│   │   └── exec.go
+│   │
+│   ├── graph/
+│   │   ├── graph.go
+│   │   ├── owners.go
+│   │   └── placement.go
+│   │
+│   ├── api/
+│   │   ├── server.go
+│   │   ├── health.go
+│   │   ├── nodes.go
+│   │   ├── workloads.go
+│   │   ├── pods.go
+│   │   ├── logs.go
+│   │   └── actions.go
+│   │
+│   ├── config/
+│   │   └── config.go
+│   │
+│   └── browser/
+│       └── open.go
+│
+├── web/
+│   ├── index.html
+│   ├── css/
+│   │   └── app.css
+│   └── js/
+│       ├── api.js
+│       ├── nodes.js
+│       ├── workloads.js
+│       ├── troubleshoot.js
+│       └── logs.js
+│
+├── go.mod
+├── go.sum
+├── LICENSE
+├── README.md
+└── .github/
+    └── workflows/
+        ├── test.yml
+        └── release.yml</pre>
+
+      <div class="grid-3">
+        <div class="mini"><h4>main.go</h4><p>Load config, initialize Kubernetes client, start local HTTP server, optionally open browser.</p></div>
+        <div class="mini"><h4>client.go</h4><p>Resolve kubeconfig/current context and create typed/dynamic Kubernetes clients.</p></div>
+        <div class="mini"><h4>server.go</h4><p>Register REST/streaming routes and serve embedded frontend files.</p></div>
+      </div>
+
+      <div class="card">
+        <h4>Embedded frontend</h4>
+        <pre>//go:embed web/*
+var webFS embed.FS</pre>
+        <p class="muted">This is what enables the entire UI to ship inside one executable.</p>
+      </div>
+    </section>
+
+    <section id="api-design">
+      <div class="section-head">
+        <div class="label">12 — Engineering</div>
+        <h3>Backend API Design</h3>
+        <p>The browser should call your local product API, not raw Kubernetes API paths.</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Endpoint</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET /api/health</code></td><td>Tool health, active context, Kubernetes connectivity, metrics availability</td></tr>
+            <tr><td><code>GET /api/contexts</code></td><td>Available kubeconfig contexts</td></tr>
+            <tr><td><code>GET /api/namespaces</code></td><td>Namespaces visible to the current user</td></tr>
+            <tr><td><code>GET /api/nodes</code></td><td>Node health and capacity summary</td></tr>
+            <tr><td><code>GET /api/nodes/{name}</code></td><td>Node detail, allocated/used/wasted resources and pods</td></tr>
+            <tr><td><code>GET /api/workloads?namespace=...</code></td><td>Deployments, DaemonSets, ReplicaSets and relationships</td></tr>
+            <tr><td><code>GET /api/pods?namespace=...</code></td><td>Pod state, ownership, placement and restarts</td></tr>
+            <tr><td><code>GET /api/events</code></td><td>Recent relevant Kubernetes events</td></tr>
+            <tr><td><code>GET /api/logs</code></td><td>stdout/stderr log retrieval or streaming</td></tr>
+            <tr><td><code>GET /api/file-logs</code></td><td>Optional configured file-backed log retrieval</td></tr>
+            <tr><td><code>GET /api/graph</code></td><td>Normalized resource relationship graph</td></tr>
+            <tr><td><code>POST /api/actions/restart-pod</code></td><td>Guarded write action when write mode is enabled</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout">
+        <strong>Design rule:</strong> keep Kubernetes object-shape quirks inside the Go backend so the frontend works against stable product-level models.
+      </div>
+    </section>
+
+    <section id="security">
+      <div class="section-head">
+        <div class="label">13 — Engineering</div>
+        <h3>Security & RBAC</h3>
+        <p>The safest open-source posture is local-only, RBAC-respecting and read-only by default.</p>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h4>Authentication</h4>
+          <ul class="checklist">
+            <li>Use existing kubeconfig authentication</li>
+            <li>Bind the local server to 127.0.0.1 by default</li>
+            <li>Do not copy cluster credentials into browser JavaScript</li>
+            <li>Do not invent a parallel authorization layer</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>Authorization</h4>
+          <ul class="checklist">
+            <li>Kubernetes RBAC remains authoritative</li>
+            <li>Read-only mode is the default</li>
+            <li>Write actions are explicit and gated</li>
+            <li>Surface permission-denied errors clearly</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout bad">
+        <strong>Avoid:</strong> shipping a default configuration that allows arbitrary file reads or arbitrary <code>kubectl exec</code>-style commands from the browser.
+      </div>
+    </section>
+
+    <section id="packaging">
+      <div class="section-head">
+        <div class="label">14 — Engineering</div>
+        <h3>Packaging, Releases & Homebrew</h3>
+        <p>The product experience should be a single install followed by a single command.</p>
+      </div>
+      <div class="diagram">$ brew install owner/tap/kubeops
+$ kubeops
+
+✓ Context: current-kubernetes-context
+✓ Kubernetes API connected
+✓ Metrics API available
+
+Dashboard: http://127.0.0.1:7777
+Opening browser...</div>
+
+      <div class="grid-3">
+        <div class="mini"><h4>Build targets</h4><p>macOS arm64, macOS amd64, Linux amd64 and Linux arm64.</p></div>
+        <div class="mini"><h4>Release automation</h4><p>GitHub Actions or GoReleaser builds checksums and tagged release archives.</p></div>
+        <div class="mini"><h4>Homebrew</h4><p>Start with a third-party tap; later consider a broader package ecosystem.</p></div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="section-head">
+        <div class="label">15 — Engineering</div>
+        <h3>Version Roadmap</h3>
+        <p>Do not compete feature-for-feature with mature Kubernetes clients in the first release.</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Version</th><th>Scope</th><th>Objective</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="pill green">v0.1</span></td>
+              <td>Current dashboard capabilities, single Go binary, contexts, namespaces, nodes, workloads, pods, events, logs, read-only default</td>
+              <td>Productize what already works</td>
+            </tr>
+            <tr>
+              <td><span class="pill blue">v0.2</span></td>
+              <td>Services, StatefulSets, Jobs, CronJobs, ConfigMaps, PVCs, richer metrics</td>
+              <td>Broaden resource coverage</td>
+            </tr>
+            <tr>
+              <td><span class="pill cyan">v0.3</span></td>
+              <td>Relationship graph, live watches, dependency navigation, guided diagnostics</td>
+              <td>Strengthen differentiation</td>
+            </tr>
+            <tr>
+              <td><span class="pill amber">v0.4</span></td>
+              <td>Port forwarding, terminal/exec, YAML diff, guarded scale/restart, multi-cluster UX</td>
+              <td>Operator productivity</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="paper-positioning">
+      <div class="section-head">
+        <div class="label">16 — Publication</div>
+        <h3>How to Position the Paper</h3>
+        <p>The paper should not claim novelty merely because the tool has a Kubernetes GUI.</p>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h4 class="bad-text">Weak framing</h4>
+          <p>“We built a Kubernetes dashboard that displays nodes, workloads, logs and events.”</p>
+          <p class="muted">This is too close to existing operational tools and does not establish a research contribution.</p>
+        </div>
+        <div class="card">
+          <h4 class="good-text">Stronger framing</h4>
+          <p>“We built a relationship-aware troubleshooting and capacity-diagnosis system that correlates Kubernetes ownership, placement, resource reservations, runtime usage, events and logs.”</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Potential research question</h4>
+        <div class="callout">
+          <strong>Can automatically correlating Kubernetes workload ownership, pod placement, resource reservations, runtime usage, events and logs reduce the time and cognitive effort required to diagnose operational failures?</strong>
+        </div>
+      </div>
+    </section>
+
+    <section id="evaluation">
+      <div class="section-head">
+        <div class="label">17 — Publication</div>
+        <h3>Evaluation Plan</h3>
+        <p>The evaluation is the most important missing piece if the goal is a strong systems or industry paper.</p>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h4>Failure / diagnosis scenarios</h4>
+          <ol>
+            <li>CrashLoopBackOff</li>
+            <li>OOMKilled container</li>
+            <li>Readiness probe failure</li>
+            <li>Image pull failure</li>
+            <li>Unschedulable pod</li>
+            <li>Node pressure</li>
+            <li>Uneven pod distribution</li>
+            <li>Oversized CPU request</li>
+            <li>Oversized memory request</li>
+            <li>Deployment replica mismatch</li>
+            <li>DaemonSet missing on a node</li>
+            <li>Downstream failure visible primarily in logs/events</li>
+          </ol>
+        </div>
+        <div class="card">
+          <h4>Measurements</h4>
+          <ul>
+            <li>Time to identify root cause</li>
+            <li>Number of commands / interactions</li>
+            <li>Wrong investigative turns</li>
+            <li>Successful diagnosis rate</li>
+            <li>Confidence in diagnosis</li>
+            <li>Capacity waste found</li>
+            <li>Usability / cognitive-effort survey</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Comparison design</h4>
+        <div class="diagram">Same failure scenario
+      │
+      ├── kubectl workflow
+      ├── terminal/TUI workflow
+      ├── existing Kubernetes GUI workflow
+      └── relationship-aware tool workflow
+
+Measure:
+time + steps + accuracy + wrong turns + confidence</div>
+      </div>
+
+      <div class="callout warn">
+        <strong>Important:</strong> do not invent favorable percentages. The paper becomes stronger only when the observed numbers are collected from reproducible experiments or real engineers.
+      </div>
+    </section>
+
+    <section id="acceptance">
+      <div class="section-head">
+        <div class="label">18 — Publication</div>
+        <h3>What Makes the Work Publishable</h3>
+        <p>Implementation quality matters, but reviewers need a contribution, a comparison and evidence.</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Submission story</th><th>Assessment</th></tr></thead>
+          <tbody>
+            <tr><td>“We built a Kubernetes UI.”</td><td><span class="pill red">Weak</span></td></tr>
+            <tr><td>“We built a nicer interface than kubectl.”</td><td><span class="pill red">Weak</span></td></tr>
+            <tr><td>Open-source operational tool + architecture</td><td><span class="pill amber">Good demo/tool paper</span></td></tr>
+            <tr><td>Relationship-aware troubleshooting model + tool</td><td><span class="pill blue">Interesting contribution</span></td></tr>
+            <tr><td>Above + controlled comparison</td><td><span class="pill green">Potentially publishable</span></td></tr>
+            <tr><td>Above + real users + quantitative evaluation + lessons learned</td><td><span class="pill green">Strong industry paper</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="next-steps">
+      <div class="section-head">
+        <div class="label">19 — Publication</div>
+        <h3>Recommended Next Steps</h3>
+        <p>Focus first on productizing the runtime and defining the evaluation, not on a major frontend rewrite.</p>
+      </div>
+
+      <div class="flow">
+        <div class="step"><div class="n">1</div><strong>Freeze current UX</strong><span>Do not redesign the frontend yet</span></div>
+        <div class="step"><div class="n">2</div><strong>Create Go backend</strong><span>client-go + local API + embedded UI</span></div>
+        <div class="step"><div class="n">3</div><strong>Generalize</strong><span>Remove app-specific names and paths</span></div>
+        <div class="step"><div class="n">4</div><strong>Package</strong><span>Single binary + GitHub release + Homebrew</span></div>
+        <div class="step"><div class="n">5</div><strong>Evaluate</strong><span>Reproducible scenarios + comparison study</span></div>
+      </div>
+
+      <div class="card">
+        <h4>Immediate engineering milestone</h4>
+        <div class="callout good">
+          <strong>Success criterion:</strong> the exact dashboard functionality runs from one Go executable with no <code>start.sh</code>, no <code>kubectl proxy</code>, and no Python log helper.
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Immediate publication milestone</h4>
+        <div class="callout">
+          <strong>Success criterion:</strong> define 10–15 reproducible Kubernetes troubleshooting/capacity scenarios and measure whether the relationship-aware workflow reduces diagnosis time, steps or errors compared with conventional workflows.
+        </div>
+      </div>
+    </section>
+
+    <div class="footer-note">
+      Baseline incorporated from the supplied Kubernetes dashboard, local log helper, startup script and README. This document intentionally removes application-specific naming and treats the project as a generic open-source Kubernetes troubleshooting and capacity-diagnosis product.
+    </div>
+  </main>
+</div>
+
+<script>
+(function () {
+  const root = document.documentElement;
+  const btn = document.getElementById('themeBtn');
+  let theme = localStorage.getItem('k8s-product-doc-theme') || 'dark';
+  root.setAttribute('data-theme', theme);
+
+  btn.addEventListener('click', function () {
+    theme = theme === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', theme);
+    localStorage.setItem('k8s-product-doc-theme', theme);
+  });
+
+  const links = Array.from(document.querySelectorAll('#nav a'));
+  const sections = links.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+
+  function setActive() {
+    let active = sections[0];
+    for (const s of sections) {
+      if (s.getBoundingClientRect().top <= 110) active = s;
+    }
+    links.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + active.id));
+  }
+  document.addEventListener('scroll', setActive, { passive: true });
+  setActive();
+})();
+</script>
+</body>
+</html>

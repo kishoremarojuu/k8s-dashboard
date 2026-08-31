@@ -1,0 +1,2414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Kubernetes Troubleshooter</title>
+<script>
+  // Applied synchronously, before CSS is matched, so the page never flashes
+  // the wrong theme on load while the rest of the script (at the bottom of
+  // <body>) is still parsing.
+  (function () {
+    try {
+      var stored = localStorage.getItem('k8s-dashboard-theme') || 'system';
+      var resolved = stored === 'system'
+        ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+        : stored;
+      document.documentElement.setAttribute('data-theme', resolved);
+    } catch (e) {}
+  })();
+</script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-border: #262b36;
+    --text: #e6e8ee;
+    --muted: #8b93a7;
+    --accent: #5b8dee;
+    --ok: #3fbf7f;
+    --warn: #e0a83c;
+    --bad: #e05c5c;
+    --input-bg: #1f232d;
+    --hover-bg: #1c202a;
+    --code-bg: #0a0c10;
+    --code-text: #d7e0ea;
+    --log-ts: #556074;
+    --grand-total-bg: #1f2530;
+    --shadow: rgba(0,0,0,.45);
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --panel-border: #dde1e7;
+    --text: #1c2128;
+    --muted: #667085;
+    --accent: #3f6fe0;
+    --ok: #1c9a5b;
+    --warn: #ad7519;
+    --bad: #d0453f;
+    --input-bg: #f7f8fa;
+    --hover-bg: #eef1f5;
+    --code-bg: #eef0f3;
+    --code-text: #1c2128;
+    --log-ts: #6b7280;
+    --grand-total-bg: #e4ecff;
+    --shadow: rgba(0,0,0,.12);
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --series-4: #eda100;
+    --series-5: #e87ba4;
+    --series-6: #008300;
+    --series-7: #4a3aa7;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+  }
+
+  .app { display: flex; min-height: 100vh; }
+
+  .sidebar {
+    width: 190px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-right: 1px solid var(--panel-border);
+    padding: 16px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .sidebar-brand {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    padding: 0 20px 16px;
+    border-bottom: 1px solid var(--panel-border);
+    margin-bottom: 8px;
+  }
+  .sidebar-theme {
+    margin-top: auto;
+    padding: 16px 17px 4px;
+    border-top: 1px solid var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .sidebar-theme label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .sidebar-theme select { width: 100%; min-width: 0; }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-left: 3px solid transparent;
+    color: var(--muted);
+    padding: 10px 17px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    border-radius: 0;
+  }
+  .nav-item:hover { background: var(--hover-bg); color: var(--text); }
+  .nav-item.active { background: rgba(91,141,238,.12); color: var(--accent); border-left-color: var(--accent); }
+
+  .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-border);
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; white-space: nowrap; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  select, input, button {
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  select { min-width: 180px; }
+  button { cursor: pointer; background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:hover { filter: brightness(1.1); }
+  button.secondary { background: var(--input-bg); color: var(--text); border-color: var(--panel-border); font-weight: 500; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); display: inline-block; margin-right: 6px; }
+  #status-dot.connected { background: var(--ok); }
+  #status-text { font-size: 12px; color: var(--muted); }
+
+  main { padding: 20px; flex: 1; }
+  .view { display: none; flex-direction: column; gap: 20px; max-width: 1500px; margin: 0 auto; }
+  .view.active { display: flex; }
+
+  .banner {
+    background: rgba(224,168,60,.12);
+    border: 1px solid rgba(224,168,60,.35);
+    color: var(--warn);
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 13px;
+  }
+
+  .stat-row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .stat-card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    min-width: 160px;
+    flex: 1;
+  }
+  .stat-card .num { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  .stat-card .num.small { font-size: 18px; }
+  .stat-card .label { color: var(--muted); font-size: 12px; margin-top: 4px; text-transform: uppercase; letter-spacing: .04em; }
+  .stat-card .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+  .panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 10px; overflow: hidden; }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid var(--panel-border); gap: 12px; flex-wrap: wrap;
+  }
+  .panel-head h2 { font-size: 13px; margin: 0; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .panel-head h2 .note { color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 16px; border-bottom: 1px solid var(--panel-border); white-space: nowrap; }
+  th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  tbody tr:hover { background: var(--hover-bg); }
+  tbody tr:last-child td { border-bottom: none; }
+  tr.clickable { cursor: pointer; }
+  tr.subtotal-row td { background: var(--hover-bg); font-weight: 600; }
+  tr.grand-total-row td { background: var(--grand-total-bg); font-weight: 700; border-bottom: 2px solid var(--accent); }
+
+  .ts-target-row { padding: 16px; display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
+  .cmd-row { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--panel-border); }
+  .cmd-row:last-child { border-bottom: none; }
+  .cmd-row .cmd-label { width: 150px; flex-shrink: 0; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  .cmd-row code {
+    flex: 1; min-width: 0; background: var(--code-bg); color: var(--code-text); padding: 6px 10px; border-radius: 6px;
+    font-family: var(--mono); font-size: 12px; overflow-x: auto; white-space: nowrap;
+  }
+  .describe-box {
+    background: var(--code-bg); color: var(--code-text); font-family: var(--mono); font-size: 12px; line-height: 1.5;
+    padding: 12px 16px; max-height: 420px; overflow: auto; white-space: pre-wrap; margin: 0;
+  }
+  .panel.danger { border-color: var(--bad); }
+  .panel.danger .panel-head { border-bottom-color: var(--bad); }
+  .panel.danger .panel-head h2 { color: var(--bad); }
+  .danger-item { padding: 16px; border-bottom: 1px solid var(--panel-border); display: flex; flex-direction: column; gap: 8px; }
+  .danger-item:last-child { border-bottom: none; }
+  .danger-item .danger-target { font-size: 13px; }
+  .danger-item .danger-note { font-size: 12px; color: var(--muted); }
+  .danger-item .danger-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .danger-item input[type="text"] { min-width: 260px; }
+  button.danger-btn { background: var(--bad); border-color: var(--bad); }
+  .danger-result { padding: 0 16px 16px; font-size: 12px; }
+  .danger-result.ok { color: var(--ok); }
+  .danger-result.bad { color: var(--bad); }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .pill.ok { background: rgba(63,191,127,.15); color: var(--ok); }
+  .pill.warn { background: rgba(224,168,60,.15); color: var(--warn); }
+  .pill.bad { background: rgba(224,92,92,.15); color: var(--bad); }
+  .pill.muted { background: rgba(139,147,167,.15); color: var(--muted); }
+  .empty { padding: 24px; text-align: center; color: var(--muted); }
+  .table-wrap { max-height: 340px; overflow: auto; }
+  .table-wrap.tall { max-height: 75vh; }
+
+  .subtabs { display: flex; gap: 4px; padding: 0 16px; border-bottom: 1px solid var(--panel-border); }
+  .subtab-btn {
+    padding: 10px 14px; font-size: 12px; font-weight: 600; background: none; border: none;
+    border-bottom: 2px solid transparent; color: var(--muted); border-radius: 0; cursor: pointer; font-family: inherit;
+  }
+  .subtab-btn:hover { color: var(--text); }
+  .subtab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .subview { display: none; flex-direction: column; gap: 16px; padding: 16px; }
+  .subview.active { display: flex; }
+  button.small-btn { padding: 4px 10px; font-size: 12px; }
+  .wl-toolbar { display: flex; align-items: center; gap: 10px; }
+  .wl-toolbar input[type="text"] { min-width: 260px; }
+  .wl-node-filter-banner {
+    display: none; align-items: center; justify-content: space-between; gap: 12px;
+    margin: 16px 16px 0; padding: 10px 16px; border-radius: 8px;
+    background: rgba(91,141,238,.12); border: 1px solid rgba(91,141,238,.35); color: var(--accent); font-size: 13px;
+  }
+  .wl-node-filter-banner.active { display: flex; }
+  .wl-node-link, .wl-pod-link, .wl-deployment-link, .wl-daemonset-link { color: var(--accent); background: none; border: none; padding: 0; font: inherit; cursor: pointer; text-decoration: underline; }
+  .wl-node-link:hover, .wl-pod-link:hover, .wl-deployment-link:hover, .wl-daemonset-link:hover { filter: brightness(1.15); }
+  th.sortable-th { cursor: pointer; user-select: none; }
+  th.sortable-th:hover { color: var(--text); }
+  th.sortable-th span { font-size: 9px; color: var(--accent); }
+
+  .usage-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .usage-bar { width: 90px; height: 6px; border-radius: 3px; background: var(--panel-border); overflow: hidden; flex-shrink: 0; }
+  .usage-bar-fill { height: 100%; border-radius: 3px; }
+  .usage-bar-fill.ok { background: var(--ok); }
+  .usage-bar-fill.warn { background: var(--warn); }
+  .usage-bar-fill.bad { background: var(--bad); }
+  .usage-pct { font-size: 11px; color: var(--muted); width: 34px; text-align: right; flex-shrink: 0; }
+
+  #log-box {
+    background: var(--code-bg);
+    color: var(--code-text);
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 12px 16px;
+    height: 640px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #log-box .ts { color: var(--log-ts); margin-right: 8px; }
+  #log-box mark { background: rgba(224,168,60,.55); color: #0a0c10; border-radius: 2px; }
+  .log-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .log-controls select { min-width: 140px; }
+  .combo { position: relative; display: inline-block; }
+  .combo-suggestions {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 30;
+    margin-top: 4px;
+    min-width: 100%;
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px var(--shadow);
+  }
+  .combo-suggestions.open { display: block; }
+  .combo-suggestions .combo-item { padding: 7px 10px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .combo-suggestions .combo-item:hover, .combo-suggestions .combo-item.active { background: var(--hover-bg); color: var(--accent); }
+  .combo-suggestions .combo-empty { padding: 7px 10px; font-size: 12px; color: var(--muted); }
+  .restart-hi { color: var(--warn); font-weight: 700; }
+  .restart-crit { color: var(--bad); font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <nav class="sidebar">
+    <div class="sidebar-brand">Kubernetes Troubleshooter</div>
+    <button class="nav-item active" data-view="nodes">Nodes</button>
+    <button class="nav-item" data-view="workloads">Workloads</button>
+    <button class="nav-item" data-view="troubleshoot">Troubleshoot</button>
+    <div class="sidebar-theme">
+      <label for="theme-select">Theme</label>
+      <select id="theme-select">
+        <option value="system">System default</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </div>
+  </nav>
+
+  <div class="main-col">
+
+    <header>
+      <h1>Kubernetes Troubleshooter</h1>
+      <div class="field">
+        <label for="proxy-url">Local API</label>
+        <input id="proxy-url" type="text" value="http://127.0.0.1:7777" size="24">
+      </div>
+      <div class="field nodes-only" style="display:none;">
+        <label for="node-select">Node</label>
+        <select id="node-select"><option value="">Connect first…</option></select>
+      </div>
+      <div class="field nodes-only" style="display:none;">
+        <label for="sort-select">Sort pods by</label>
+        <select id="sort-select">
+          <option value="cpuUsed">CPU used</option>
+          <option value="memUsed">Memory used</option>
+          <option value="cpuReq">CPU requested</option>
+          <option value="memReq">Memory requested</option>
+          <option value="cpuWaste">CPU reserved-but-idle</option>
+          <option value="memWaste">Memory reserved-but-idle</option>
+        </select>
+      </div>
+      <div class="field nodes-only" style="display:none;">
+        <label for="app-prefix">Pod group prefix</label>
+        <input id="app-prefix" type="text" value="" size="14" placeholder="optional" title="Pods whose names start with this value are grouped together for capacity totals">
+      </div>
+      <button id="connect-btn">Connect</button>
+      <button id="refresh-btn" class="secondary">Refresh</button>
+      <label style="display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;">
+        <input type="checkbox" id="auto-refresh" checked style="width:auto;padding:0;"> auto-refresh (10s)
+      </label>
+      <span style="margin-left:auto;display:flex;align-items:center;">
+        <span id="status-dot"></span><span id="status-text">disconnected</span>
+      </span>
+    </header>
+
+    <main>
+
+      <!-- ================================= Nodes view ================================= -->
+      <section id="view-nodes" class="view active">
+
+        <div id="metrics-banner" class="banner" style="display:none;"></div>
+
+        <div class="stat-row">
+          <div class="stat-card">
+            <div class="num" id="stat-nodes">–</div>
+            <div class="label">Nodes (cluster-wide)</div>
+          </div>
+          <div class="stat-card">
+            <div class="num" id="stat-nodes-ready">–</div>
+            <div class="label">Nodes Ready</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Node Resource Usage <span class="note">(allocated, like `kubectl describe nodes`) — click a row to drill in below</span></h2></div>
+          <div class="table-wrap">
+            <table id="node-usage-table">
+              <thead><tr><th>Name</th><th>Status</th><th>Age</th><th>CPU Requests</th><th>CPU Limits</th><th>Mem Requests</th><th>Mem Limits</th><th>Pods</th></tr></thead>
+              <tbody><tr><td class="empty" colspan="8">No data yet</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="stat-row" id="node-summary-row" style="display:none;">
+          <div class="stat-card">
+            <div class="num small" id="node-status">–</div>
+            <div class="label">Node Status</div>
+            <div class="sub" id="node-instance-type">–</div>
+          </div>
+          <div class="stat-card">
+            <div class="num" id="node-pod-count">–</div>
+            <div class="label">Pods on node</div>
+            <div class="sub" id="node-pod-capacity">–</div>
+          </div>
+          <div class="stat-card">
+            <div class="num small" id="node-cpu-allocatable">–</div>
+            <div class="label">CPU Allocatable</div>
+            <div class="sub" id="node-cpu-capacity">–</div>
+          </div>
+          <div class="stat-card">
+            <div class="num small" id="node-mem-allocatable">–</div>
+            <div class="label">Memory Allocatable</div>
+            <div class="sub" id="node-mem-capacity">–</div>
+          </div>
+        </div>
+
+        <div class="panel" id="allocated-vs-used-panel" style="display:none;">
+          <div class="panel-head"><h2>Allocated (Requested) vs Actually Used <span class="note">— requests reserve capacity on the node whether or not the pod ever uses it</span></h2></div>
+          <div class="table-wrap">
+            <table id="allocation-table">
+              <thead><tr><th></th><th>Requested (reserved)</th><th>Limits (ceiling)</th><th>Actually Used</th><th>Reserved but idle</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel" id="node-pods-panel" style="display:none;">
+          <div class="panel-head">
+            <h2>Pods on selected node <span class="note">sorted by selection above, most resource-hungry first</span></h2>
+          </div>
+          <div class="table-wrap tall">
+            <table id="node-pods-table">
+              <thead>
+                <tr>
+                  <th>Pod</th><th>Namespace</th><th>Group</th><th>QoS</th>
+                  <th>CPU Req</th><th>CPU Limit</th><th>CPU Used</th>
+                  <th>Mem Req</th><th>Mem Limit</th><th>Mem Used</th>
+                  <th>Restarts</th>
+                </tr>
+              </thead>
+              <tbody><tr><td class="empty" colspan="11">Pick a node above to drill in</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ============================== Workloads view ============================== -->
+      <section id="view-workloads" class="view">
+
+        <div class="panel">
+          <div class="panel-head"><h2>Namespace</h2></div>
+          <div class="ts-target-row">
+            <div class="field">
+              <label for="wl-ns-select">Namespace</label>
+              <select id="wl-ns-select"><option value="">Connect first…</option></select>
+            </div>
+            <button id="wl-refresh-btn" class="secondary">Refresh list</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="subtabs">
+            <button class="subtab-btn active" data-subtab="deployments">Deployments</button>
+            <button class="subtab-btn" data-subtab="pods">Pods</button>
+            <button class="subtab-btn" data-subtab="daemonsets">DaemonSets</button>
+            <button class="subtab-btn" data-subtab="replicasets">ReplicaSets</button>
+          </div>
+
+          <div id="wl-node-filter-banner" class="wl-node-filter-banner">
+            <span>Showing workloads running on node <strong id="wl-node-filter-name">–</strong></span>
+            <button id="wl-node-filter-clear" class="secondary small-btn">Clear node filter</button>
+          </div>
+
+          <div id="wl-deployment-filter-banner" class="wl-node-filter-banner">
+            <span>Showing pods for deployment <strong id="wl-deployment-filter-name">–</strong></span>
+            <button id="wl-deployment-filter-clear" class="secondary small-btn">Clear deployment filter</button>
+          </div>
+
+          <div id="wl-daemonset-filter-banner" class="wl-node-filter-banner">
+            <span>Showing pods for daemonset <strong id="wl-daemonset-filter-name">–</strong></span>
+            <button id="wl-daemonset-filter-clear" class="secondary small-btn">Clear daemonset filter</button>
+          </div>
+
+          <div id="wl-subview-deployments" class="subview active">
+            <div class="wl-toolbar">
+              <input type="text" id="wl-search-deployments" placeholder="Search deployments by name…">
+            </div>
+            <div class="table-wrap tall">
+              <table id="wl-deployments-table">
+                <thead><tr><th>Name</th><th>Ready</th><th>Up-to-date</th><th>Available</th><th>Age</th><th>Actions</th></tr></thead>
+                <tbody><tr><td class="empty" colspan="6">Pick a namespace above</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="wl-subview-pods" class="subview">
+            <div class="wl-toolbar">
+              <input type="text" id="wl-search-pods" placeholder="Search pods by name…">
+            </div>
+            <div class="table-wrap tall">
+              <table id="wl-pods-table">
+                <thead><tr><th>Name</th><th id="wl-pods-ready-header" class="sortable-th">Ready <span id="wl-pods-ready-sort-arrow"></span></th><th>Status</th><th>Restarts</th><th id="wl-pods-node-header" class="sortable-th">Node <span id="wl-pods-node-sort-arrow">▲</span></th><th>Age</th><th>Actions</th></tr></thead>
+                <tbody><tr><td class="empty" colspan="7">Pick a namespace above</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="wl-subview-daemonsets" class="subview">
+            <div class="wl-toolbar">
+              <input type="text" id="wl-search-daemonsets" placeholder="Search daemonsets by name…">
+            </div>
+            <div class="table-wrap tall">
+              <table id="wl-daemonsets-table">
+                <thead><tr><th>Name</th><th>Desired</th><th>Current</th><th>Ready</th><th>Available</th><th>Age</th><th>Actions</th></tr></thead>
+                <tbody><tr><td class="empty" colspan="7">Pick a namespace above</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="wl-subview-replicasets" class="subview">
+            <div class="wl-toolbar">
+              <input type="text" id="wl-search-replicasets" placeholder="Search replicasets by name…">
+            </div>
+            <div class="table-wrap tall">
+              <table id="wl-replicasets-table">
+                <thead><tr><th>Name</th><th>Desired</th><th>Current</th><th>Ready</th><th>Age</th></tr></thead>
+                <tbody><tr><td class="empty" colspan="5">Pick a namespace above</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="wl-danger-result" class="danger-result"></div>
+
+      </section>
+
+      <!-- ============================= Troubleshoot view ============================= -->
+      <section id="view-troubleshoot" class="view">
+
+        <div class="panel">
+          <div class="panel-head"><h2>Target</h2></div>
+          <div class="ts-target-row">
+            <div class="field">
+              <label for="ts-ns-select">Namespace</label>
+              <select id="ts-ns-select"><option value="">Connect first…</option></select>
+            </div>
+            <div class="field">
+              <label for="ts-filter">Filter keyword</label>
+              <input id="ts-filter" type="text" value="" size="14" placeholder="optional" title="Filters the Workload dropdown, and the Pod dropdown when no workload is selected. Once a workload is picked, the Pod dropdown instead shows only pods matching that workload's selector.">
+            </div>
+            <div class="field">
+              <label for="ts-workload-select">Workload</label>
+              <select id="ts-workload-select"><option value="">Pick namespace first…</option></select>
+            </div>
+            <div class="field">
+              <label for="ts-pod-select">Pod</label>
+              <select id="ts-pod-select"><option value="">Pick namespace first…</option></select>
+            </div>
+            <div class="field">
+              <label for="ts-container-select">Container</label>
+              <select id="ts-container-select"><option value="">–</option></select>
+            </div>
+            <button id="ts-refresh-btn" class="secondary">Refresh list</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Quick commands <span class="note">— ready to copy into a terminal, filled in from your selection above</span></h2></div>
+          <div>
+            <div class="cmd-row"><span class="cmd-label">Get pods</span><code id="cmd-get-pods">pick a namespace</code><button class="secondary copy-btn" data-target="cmd-get-pods">Copy</button></div>
+            <div class="cmd-row"><span class="cmd-label">Describe workload</span><code id="cmd-describe-workload">pick a workload</code><button class="secondary copy-btn" data-target="cmd-describe-workload">Copy</button></div>
+            <div class="cmd-row"><span class="cmd-label">Describe pod</span><code id="cmd-describe-pod">pick a pod</code><button class="secondary copy-btn" data-target="cmd-describe-pod">Copy</button></div>
+            <div class="cmd-row"><span class="cmd-label">Pod logs</span><code id="cmd-logs">pick a pod and container</code><button class="secondary copy-btn" data-target="cmd-logs">Copy</button></div>
+            <div class="cmd-row"><span class="cmd-label">Delete workload</span><code id="cmd-delete-workload">pick a workload</code><button class="secondary copy-btn" data-target="cmd-delete-workload">Copy</button></div>
+            <div class="cmd-row"><span class="cmd-label">Delete pod</span><code id="cmd-delete-pod">pick a pod</code><button class="secondary copy-btn" data-target="cmd-delete-pod">Copy</button></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Pods per Node <span class="note">— distribution of the pods matched above across nodes</span></h2></div>
+          <div id="ts-pods-per-node" style="padding:16px;display:flex;flex-direction:column;gap:10px;">
+            <div class="empty">Pick a namespace above</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Pods <span class="note">— auto-updates with the namespace / deployment filter above; click a row for full detail</span></h2></div>
+          <div class="table-wrap">
+            <table id="ts-pods-table">
+              <thead><tr><th>Name</th><th>Ready</th><th>Status</th><th>Restarts</th><th>Last Exit</th><th>Node</th><th>Age</th></tr></thead>
+              <tbody><tr><td class="empty" colspan="7">Pick a namespace above</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Describe Workload</h2>
+            <button id="describe-workload-btn" class="secondary">Describe Workload</button>
+          </div>
+          <pre id="describe-workload-output" class="describe-box">Pick a workload above, then click Describe Workload.</pre>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Describe Pod</h2>
+            <button id="describe-pod-btn" class="secondary">Describe Pod</button>
+          </div>
+          <pre id="describe-pod-output" class="describe-box">Pick a pod above, then click Describe Pod.</pre>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Events</h2>
+            <div class="log-controls">
+              <select id="events-pod-select"><option value="">All pods in namespace…</option></select>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="events-table">
+              <thead><tr><th>Last Seen</th><th>Type</th><th>Reason</th><th>Object</th><th>Count</th><th>Message</th></tr></thead>
+              <tbody><tr><td class="empty" colspan="6">No data yet</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Logs <span class="note">— for the pod/container selected above</span></h2>
+            <div class="log-controls">
+              <select id="source-select" title="Log source">
+                <option value="stdout">stdout (kubectl logs)</option>
+              </select>
+              <div class="field" style="display:none;gap:2px;">
+                <label for="log-file-server-url" style="font-size:10px;">Log File Server URL</label>
+                <input id="log-file-server-url" type="text" value="" size="20">
+              </div>
+              <label style="display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;">
+                <input type="checkbox" id="previous-logs" style="width:auto;padding:0;"> previous (crashed) container
+              </label>
+              <input id="tail-lines" type="number" value="100" min="1" max="5000" style="width:80px;" title="Number of lines to load, from the end of the log">
+              <button id="load-logs-btn">Load Logs</button>
+              <label style="display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;">
+                <input type="checkbox" id="live-tail-toggle" style="width:auto;padding:0;"> live tail (poll every 3s)
+              </label>
+              <button id="pause-btn" class="secondary" disabled>Pause</button>
+              <button id="clear-log-btn" class="secondary">Clear</button>
+            </div>
+          </div>
+          <div class="log-controls" style="padding:10px 16px;border-bottom:1px solid var(--panel-border);">
+            <input id="log-search" type="text" placeholder="Search loaded logs…" style="min-width:240px;">
+            <button id="search-btn" class="secondary">Search</button>
+            <button id="search-clear-btn" class="secondary">Clear search</button>
+            <span id="search-match-count" style="color:var(--muted);font-size:12px;"></span>
+          </div>
+          <div id="log-box">Select a pod and container above, then click Load Logs.</div>
+        </div>
+
+        <div class="panel danger">
+          <div class="panel-head"><h2>Danger Zone</h2></div>
+
+          <div class="danger-item">
+            <div class="danger-target">Delete <span id="danger-workload-kind">workload</span> <strong id="danger-workload-name">–</strong> in namespace <strong id="danger-workload-ns">–</strong></div>
+            <div class="danger-note">Removes the Deployment or DaemonSet resource entirely — its pods are terminated and will <strong>not</strong> come back until the resource is re-applied (e.g. via your CI/CD pipeline). Much more destructive than deleting a single pod.</div>
+            <div class="danger-controls">
+              <button id="delete-workload-btn" class="danger-btn" disabled>Delete Workload</button>
+            </div>
+          </div>
+
+          <div class="danger-item">
+            <div class="danger-target">Delete pod <strong id="danger-pod-name">–</strong> in namespace <strong id="danger-pod-ns">–</strong></div>
+            <div class="danger-note">Terminates just this pod. If it belongs to a Deployment/ReplicaSet, a replacement pod is created automatically — this is the standard way to force-restart a single pod.</div>
+            <div class="danger-controls">
+              <button id="delete-pod-btn" class="danger-btn" disabled>Delete Pod</button>
+            </div>
+          </div>
+
+          <div id="ts-danger-result" class="danger-result"></div>
+        </div>
+
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+
+  // ---------- Shared: theme (light / dark / system default) ----------
+
+  const THEME_KEY = 'k8s-dashboard-theme';
+  const themeSelectEl = $('theme-select');
+  const systemThemeMedia = window.matchMedia('(prefers-color-scheme: light)');
+
+  function resolveTheme(pref) {
+    return pref === 'system' ? (systemThemeMedia.matches ? 'light' : 'dark') : pref;
+  }
+
+  function applyTheme(pref) {
+    document.documentElement.setAttribute('data-theme', resolveTheme(pref));
+  }
+
+  const storedThemePref = localStorage.getItem(THEME_KEY) || 'system';
+  themeSelectEl.value = storedThemePref;
+  applyTheme(storedThemePref); // re-applies what the head script already set; cheap and keeps this in sync if that script's try/catch ever swallowed an error
+
+  themeSelectEl.addEventListener('change', () => {
+    const pref = themeSelectEl.value;
+    localStorage.setItem(THEME_KEY, pref);
+    applyTheme(pref);
+  });
+
+  // Live-update if the OS theme changes while "System default" is selected.
+  systemThemeMedia.addEventListener('change', () => {
+    if ((localStorage.getItem(THEME_KEY) || 'system') === 'system') applyTheme('system');
+  });
+
+  // ---------- Shared: nav / view switching ----------
+
+  const navItems = [...document.querySelectorAll('.nav-item')];
+  const views = { nodes: $('view-nodes'), workloads: $('view-workloads'), troubleshoot: $('view-troubleshoot') };
+  const nodesOnlyEls = [...document.querySelectorAll('.nodes-only')];
+
+  let currentView = 'nodes';
+  let connected = false;
+
+  function switchView(view) {
+    currentView = view;
+    navItems.forEach(el => el.classList.toggle('active', el.dataset.view === view));
+    Object.entries(views).forEach(([name, el]) => el.classList.toggle('active', name === view));
+    nodesOnlyEls.forEach(el => el.style.display = view === 'nodes' ? '' : 'none');
+    if (connected) {
+      refreshActive();
+      restartAutoRefresh();
+    }
+  }
+
+  navItems.forEach(el => el.addEventListener('click', () => switchView(el.dataset.view)));
+
+  // ---------- Shared: header controls ----------
+
+  const proxyUrlEl = $('proxy-url');
+  const logFileServerUrlEl = $('log-file-server-url');
+  const connectBtn = $('connect-btn');
+  const refreshBtn = $('refresh-btn');
+  const autoRefreshEl = $('auto-refresh');
+  const statusDot = $('status-dot');
+  const statusText = $('status-text');
+  let writeEnabled = false;
+  let activeContext = '';
+
+  function proxyUrl() { return proxyUrlEl.value.replace(/\/$/, ''); }
+  function logFileServerUrl() { return (logFileServerUrlEl.value || proxyUrl()).replace(/\/$/, ''); }
+
+  if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+    proxyUrlEl.value = window.location.origin;
+    proxyUrlEl.readOnly = true;
+    logFileServerUrlEl.value = window.location.origin;
+  }
+
+  async function apiGet(path) {
+    const res = await fetch(proxyUrl() + path);
+    if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
+    return res.json();
+  }
+
+  function setConnected(ok, msg) {
+    statusDot.classList.toggle('connected', ok);
+    statusText.textContent = msg || (ok ? 'connected' : 'disconnected');
+  }
+
+  function ageFrom(timestamp) {
+    if (!timestamp) return '–';
+    const ms = Date.now() - new Date(timestamp).getTime();
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h`;
+    const d = Math.floor(h / 24);
+    return `${d}d`;
+  }
+
+  function pill(text, kind) {
+    return `<span class="pill ${kind}">${text}</span>`;
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function pctKind(pct) {
+    if (pct >= 90) return 'bad';
+    if (pct >= 70) return 'warn';
+    return 'ok';
+  }
+
+  function pctPill(used, capacity) {
+    if (!capacity) return '';
+    const pct = Math.round((used / capacity) * 100);
+    return ` ${pill(pct + '%', pctKind(pct))}`;
+  }
+
+  // ---------- Shared: resource unit parsing / formatting ----------
+
+  function parseCpu(qty) {
+    if (!qty) return 0;
+    if (qty.endsWith('m')) return parseFloat(qty) / 1000;
+    if (qty.endsWith('n')) return parseFloat(qty) / 1e9;
+    if (qty.endsWith('u')) return parseFloat(qty) / 1e6;
+    return parseFloat(qty);
+  }
+
+  const MEM_UNITS = { Ki: 1024, Mi: 1024 ** 2, Gi: 1024 ** 3, Ti: 1024 ** 4, K: 1e3, M: 1e6, G: 1e9, T: 1e12 };
+
+  function parseMem(qty) {
+    if (!qty) return 0;
+    const match = qty.match(/^(\d+(?:\.\d+)?)([A-Za-z]*)$/);
+    if (!match) return 0;
+    const [, num, unit] = match;
+    return parseFloat(num) * (MEM_UNITS[unit] || 1);
+  }
+
+  function formatCpu(cores) {
+    if (cores === null || cores === undefined) return '–';
+    return cores >= 1 ? `${cores.toFixed(2)} cores` : `${Math.round(cores * 1000)}m`;
+  }
+
+  function formatMem(bytes) {
+    if (bytes === null || bytes === undefined) return '–';
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)}Gi`;
+    if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(0)}Mi`;
+    return `${Math.round(bytes)}B`;
+  }
+
+  function podRestartCount(pod) {
+    const statuses = pod.status?.containerStatuses || [];
+    return statuses.reduce((sum, cs) => sum + (cs.restartCount || 0), 0);
+  }
+
+  // =============================================================================
+  // Pods / Events / Logs (rendered within the Troubleshoot view)
+  // =============================================================================
+
+  const eventsTableBody = document.querySelector('#events-table tbody');
+  const eventsPodSelect = $('events-pod-select');
+
+  const sourceSelect = $('source-select');
+  const previousLogsEl = $('previous-logs');
+  const tailLinesEl = $('tail-lines');
+  const loadLogsBtn = $('load-logs-btn');
+  const liveTailToggle = $('live-tail-toggle');
+  const pauseBtn = $('pause-btn');
+  const clearLogBtn = $('clear-log-btn');
+  const logBox = $('log-box');
+  const logSearchEl = $('log-search');
+  const searchBtn = $('search-btn');
+  const searchClearBtn = $('search-clear-btn');
+  const searchMatchCountEl = $('search-match-count');
+
+  async function loadProductConfig() {
+    const config = await apiGet('/api/product/v1/config');
+    writeEnabled = config.writeEnabled === true;
+    activeContext = config.context || '';
+    const fileLogPaths = config.fileLogs?.paths || [];
+    sourceSelect.replaceChildren();
+    const stdoutOption = document.createElement('option');
+    stdoutOption.value = 'stdout';
+    stdoutOption.textContent = 'stdout (Kubernetes logs)';
+    sourceSelect.appendChild(stdoutOption);
+    fileLogPaths.forEach(path => {
+      const option = document.createElement('option');
+      option.value = path;
+      option.textContent = `file: ${path}`;
+      sourceSelect.appendChild(option);
+    });
+    return config;
+  }
+
+  let logTimer = null;
+  let logPaused = false;
+  let lastLogLine = null;
+  let allLogLines = []; // every line currently loaded for the selected pod/container, in order
+
+  async function loadNamespaces() {
+    const data = await apiGet('/api/v1/namespaces');
+    const names = data.items.map(ns => ns.metadata.name).sort();
+    const optionsHtml = '<option value="">Select namespace…</option>' +
+      names.map(n => `<option value="${n}">${n}</option>`).join('');
+
+    const tsPrev = tsNsSelect.value;
+    tsNsSelect.innerHTML = optionsHtml;
+    if (names.includes(tsPrev)) tsNsSelect.value = tsPrev;
+
+    const wlPrev = wlNsSelect.value;
+    wlNsSelect.innerHTML = optionsHtml;
+    if (names.includes(wlPrev)) {
+      wlNsSelect.value = wlPrev;
+    }
+  }
+
+  function podReadyCount(pod) {
+    const statuses = pod.status?.containerStatuses || [];
+    const ready = statuses.filter(cs => cs.ready).length;
+    return `${ready}/${statuses.length}`;
+  }
+
+  function podReadyParts(pod) {
+    const statuses = pod.status?.containerStatuses || [];
+    return { ready: statuses.filter(cs => cs.ready).length, total: statuses.length };
+  }
+
+  function podLastExitReason(pod) {
+    const statuses = pod.status?.containerStatuses || [];
+    for (const cs of statuses) {
+      if (cs.state?.waiting?.reason) {
+        return { text: cs.state.waiting.reason, bad: true, detail: cs.state.waiting.message || '' };
+      }
+    }
+    for (const cs of statuses) {
+      const term = cs.lastState?.terminated;
+      if (term?.reason) {
+        const bad = term.reason !== 'Completed' || (term.exitCode ?? 0) !== 0;
+        const detailParts = [];
+        if (term.message) detailParts.push(term.message);
+        if (term.finishedAt) detailParts.push(`finished ${term.finishedAt}`);
+        return { text: `${term.reason} (exit ${term.exitCode})`, bad, detail: detailParts.join(' · ') };
+      }
+    }
+    return null;
+  }
+
+  function populateEventsPodSelect() {
+    const prev = eventsPodSelect.value;
+    eventsPodSelect.innerHTML = '<option value="">All pods in namespace…</option>' +
+      tsAllPods.map(p => `<option value="${p.metadata.name}">${p.metadata.name}</option>`).join('');
+    if ([...eventsPodSelect.options].some(o => o.value === prev)) eventsPodSelect.value = prev;
+  }
+
+  async function loadEvents(namespace) {
+    const data = await apiGet(`/api/v1/namespaces/${namespace}/events`);
+    let events = data.items || [];
+
+    const podFilter = eventsPodSelect.value;
+    if (podFilter) {
+      events = events.filter(e => e.involvedObject?.name === podFilter);
+    }
+
+    events = events.slice().sort((a, b) => {
+      const ta = new Date(a.lastTimestamp || a.eventTime || a.metadata.creationTimestamp).getTime();
+      const tb = new Date(b.lastTimestamp || b.eventTime || b.metadata.creationTimestamp).getTime();
+      return tb - ta;
+    }).slice(0, 100);
+
+    const rows = events.map(e => {
+      const lastSeen = ageFrom(e.lastTimestamp || e.eventTime || e.metadata.creationTimestamp);
+      const type = e.type || 'Normal';
+      const typeKind = type === 'Warning' ? 'warn' : 'ok';
+      const obj = `${e.involvedObject?.kind || ''}/${e.involvedObject?.name || ''}`;
+      return `<tr>
+        <td>${lastSeen}</td>
+        <td>${pill(type, typeKind)}</td>
+        <td>${escapeHtml(e.reason || '–')}</td>
+        <td>${escapeHtml(obj)}</td>
+        <td>${e.count || 1}</td>
+        <td>${escapeHtml(e.message || '')}</td>
+      </tr>`;
+    });
+
+    eventsTableBody.innerHTML = rows.length ? rows.join('') : '<tr><td class="empty" colspan="6">No events found</td></tr>';
+  }
+
+  eventsPodSelect.addEventListener('change', () => loadEvents(tsNsSelect.value));
+
+  // ---------- Logs: one-shot load by default, live tail only if explicitly enabled ----------
+
+  function stopLiveTail() {
+    if (logTimer) clearInterval(logTimer);
+    logTimer = null;
+    logPaused = false;
+    pauseBtn.disabled = true;
+    pauseBtn.textContent = 'Pause';
+  }
+
+  function resetLogView() {
+    stopLiveTail();
+    allLogLines = [];
+    lastLogLine = null;
+    logBox.innerHTML = 'Select a pod and container above, then click Load Logs.';
+    searchMatchCountEl.textContent = '';
+  }
+
+  // Renders allLogLines into the log box, honoring the current search term
+  // (highlighting matches, or filtering to matches only if a term is set).
+  function renderLogBox() {
+    const term = logSearchEl.value.trim();
+    const lines = term
+      ? allLogLines.filter(l => l.toLowerCase().includes(term.toLowerCase()))
+      : allLogLines;
+
+    if (term) {
+      searchMatchCountEl.textContent = `${lines.length} of ${allLogLines.length} line${allLogLines.length === 1 ? '' : 's'} match`;
+    } else {
+      searchMatchCountEl.textContent = '';
+    }
+
+    const atBottom = logBox.scrollTop + logBox.clientHeight >= logBox.scrollHeight - 20;
+
+    logBox.innerHTML = lines.length
+      ? lines.map(line => lineToHtml(line, term)).join('')
+      : (allLogLines.length ? '<div style="color:var(--muted);">No lines match your search.</div>' : 'No log lines returned.');
+
+    if (!term && atBottom) logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  function lineToHtml(line, term) {
+    const spaceIdx = line.indexOf(' ');
+    const tsPart = spaceIdx > 0 ? line.slice(0, spaceIdx) : '';
+    const restPart = spaceIdx > 0 ? line.slice(spaceIdx + 1) : line;
+    const tsHtml = tsPart ? `<span class="ts">${highlight(escapeHtml(tsPart), term)}</span>` : '';
+    return `<div>${tsHtml}${highlight(escapeHtml(restPart), term)}</div>`;
+  }
+
+  function highlight(escapedText, term) {
+    if (!term) return escapedText;
+    const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return escapedText.replace(new RegExp(escapedTerm, 'ig'), (m) => `<mark>${m}</mark>`);
+  }
+
+  async function fetchLogText() {
+    const namespace = tsNsSelect.value;
+    const pod = tsPodSelect.value;
+    const container = tsContainerSelect.value;
+    const source = sourceSelect.value;
+    if (!namespace || !pod || !container) throw new Error('pick a pod and container first');
+    const tail = tailLinesEl.value || 100;
+
+    const url = source === 'stdout'
+      ? `${proxyUrl()}/api/v1/namespaces/${namespace}/pods/${pod}/log?container=${encodeURIComponent(container)}&tailLines=${tail}&timestamps=true&previous=${previousLogsEl.checked}`
+      : `${logFileServerUrl()}/tail?namespace=${encodeURIComponent(namespace)}&pod=${encodeURIComponent(pod)}&container=${encodeURIComponent(container)}&file=${encodeURIComponent(source)}&lines=${tail}`;
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    return res.text();
+  }
+
+  // One-shot load: replaces allLogLines entirely with the current tail window.
+  async function loadLogsOnce() {
+    try {
+      const text = await fetchLogText();
+      allLogLines = text.split('\n').filter(Boolean);
+      lastLogLine = allLogLines[allLogLines.length - 1] || null;
+      renderLogBox();
+    } catch (err) {
+      logBox.innerHTML = `<div style="color:var(--bad);">[error: ${escapeHtml(err.message)}]</div>`;
+    }
+  }
+
+  // Live-tail poll: appends only new lines (dedup via last-seen line) then re-renders.
+  async function pollLogs() {
+    if (logPaused) return;
+    try {
+      const text = await fetchLogText();
+      const lines = text.split('\n').filter(Boolean);
+      if (!lines.length) return;
+      let startIdx = 0;
+      if (lastLogLine) {
+        const idx = lines.lastIndexOf(lastLogLine);
+        startIdx = idx >= 0 ? idx + 1 : 0;
+      }
+      const newLines = lines.slice(startIdx);
+      if (!newLines.length) return;
+      allLogLines = allLogLines.concat(newLines);
+      lastLogLine = lines[lines.length - 1];
+      renderLogBox();
+    } catch (err) {
+      allLogLines.push(`[poll error: ${err.message}]`);
+      renderLogBox();
+    }
+  }
+
+  sourceSelect.addEventListener('change', () => {
+    resetLogView();
+    previousLogsEl.disabled = sourceSelect.value !== 'stdout';
+    if (previousLogsEl.disabled) previousLogsEl.checked = false;
+  });
+  previousLogsEl.addEventListener('change', resetLogView);
+
+  loadLogsBtn.addEventListener('click', async () => {
+    stopLiveTail();
+    logBox.textContent = 'Loading…';
+    await loadLogsOnce();
+    if (liveTailToggle.checked) {
+      pauseBtn.disabled = false;
+      logTimer = setInterval(pollLogs, 3000);
+    }
+  });
+
+  liveTailToggle.addEventListener('change', () => {
+    if (liveTailToggle.checked) {
+      if (allLogLines.length) {
+        pauseBtn.disabled = false;
+        logTimer = setInterval(pollLogs, 3000);
+      }
+    } else {
+      stopLiveTail();
+    }
+  });
+
+  pauseBtn.addEventListener('click', () => {
+    logPaused = !logPaused;
+    pauseBtn.textContent = logPaused ? 'Resume' : 'Pause';
+  });
+
+  clearLogBtn.addEventListener('click', resetLogView);
+
+  searchBtn.addEventListener('click', renderLogBox);
+  logSearchEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') renderLogBox(); });
+  searchClearBtn.addEventListener('click', () => {
+    logSearchEl.value = '';
+    renderLogBox();
+  });
+
+  // =============================================================================
+  // Nodes view
+  // =============================================================================
+
+  const nodeSelect = $('node-select');
+  const sortSelect = $('sort-select');
+  const appPrefixEl = $('app-prefix');
+  const metricsBanner = $('metrics-banner');
+
+  const statNodes = $('stat-nodes');
+  const statNodesReady = $('stat-nodes-ready');
+  const nodeUsageTableBody = document.querySelector('#node-usage-table tbody');
+
+  const nodeSummaryRow = $('node-summary-row');
+  const nodeStatusEl = $('node-status');
+  const nodeInstanceTypeEl = $('node-instance-type');
+  const nodePodCountEl = $('node-pod-count');
+  const nodePodCapacityEl = $('node-pod-capacity');
+  const nodeCpuAllocatableEl = $('node-cpu-allocatable');
+  const nodeCpuCapacityEl = $('node-cpu-capacity');
+  const nodeMemAllocatableEl = $('node-mem-allocatable');
+  const nodeMemCapacityEl = $('node-mem-capacity');
+
+  const allocationPanel = $('allocated-vs-used-panel');
+  const allocationTableBody = document.querySelector('#allocation-table tbody');
+  const nodePodsPanel = $('node-pods-panel');
+  const nodePodsTableBody = document.querySelector('#node-pods-table tbody');
+
+  let metricsAvailable = null; // null = not probed yet, true/false after probing
+
+  function usageBar(used, request) {
+    if (used === null || used === undefined) return '<span style="color:var(--muted);">–</span>';
+    if (!request) return String(used);
+    const pct = Math.round((used / request) * 100);
+    const kind = pct > 100 ? 'bad' : pctKind(pct >= 100 ? 90 : pct);
+    const width = Math.min(pct, 100);
+    return `<div class="usage-bar-wrap">
+      <div class="usage-bar"><div class="usage-bar-fill ${kind}" style="width:${width}%"></div></div>
+      <span class="usage-pct">${pct}%</span>
+    </div>`;
+  }
+
+  function qosPill(qos) {
+    if (qos === 'Guaranteed') return pill(qos, 'ok');
+    if (qos === 'Burstable') return pill(qos, 'warn');
+    if (qos === 'BestEffort') return pill(qos, 'bad');
+    return pill(qos || 'Unknown', 'muted');
+  }
+
+  // Optional local grouping for capacity analysis. With no prefix configured,
+  // every pod remains in the general cluster group.
+  function isAppPod(name) {
+    const prefix = appPrefixEl.value.trim();
+    return prefix ? name.startsWith(prefix) : false;
+  }
+
+  function typePill(isApp) {
+    return isApp ? pill('Matched', 'ok') : pill('Other', 'muted');
+  }
+
+  async function loadNodeList() {
+    const data = await apiGet('/api/v1/nodes');
+    const names = (data.items || []).map(n => n.metadata.name).sort();
+    const prev = nodeSelect.value;
+    nodeSelect.innerHTML = '<option value="">Select node…</option>' +
+      names.map(n => `<option value="${n}">${n}</option>`).join('');
+    if (names.includes(prev)) nodeSelect.value = prev;
+  }
+
+  async function probeMetrics() {
+    try {
+      await apiGet('/apis/metrics.k8s.io/v1beta1/nodes');
+      metricsAvailable = true;
+      metricsBanner.style.display = 'none';
+    } catch (err) {
+      metricsAvailable = false;
+      metricsBanner.style.display = 'block';
+      metricsBanner.textContent =
+        'metrics-server not detected in this cluster (or not reachable through this proxy) — showing requests/limits only. ' +
+        'Actual-usage columns and "reserved but idle" figures need metrics-server installed to populate.';
+    }
+  }
+
+  async function fetchAllPodMetrics() {
+    if (!metricsAvailable) return new Map();
+    try {
+      const data = await apiGet('/apis/metrics.k8s.io/v1beta1/pods');
+      const byKey = new Map();
+      for (const pm of data.items || []) {
+        const key = `${pm.metadata.namespace}/${pm.metadata.name}`;
+        let cpu = 0, mem = 0;
+        for (const c of pm.containers || []) {
+          cpu += parseCpu(c.usage?.cpu);
+          mem += parseMem(c.usage?.memory);
+        }
+        byKey.set(key, { cpu, mem });
+      }
+      return byKey;
+    } catch (err) {
+      return new Map();
+    }
+  }
+
+  async function fetchNodeMetrics(nodeName) {
+    if (!metricsAvailable) return null;
+    try {
+      const nm = await apiGet(`/apis/metrics.k8s.io/v1beta1/nodes/${nodeName}`);
+      return { cpu: parseCpu(nm.usage?.cpu), mem: parseMem(nm.usage?.memory) };
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // All-nodes overview: status + allocated requests/limits per node (mirrors
+  // `kubectl describe nodes`'s "Allocated resources" section).
+  async function loadNodeUsage(allPods) {
+    const nodesData = await apiGet('/api/v1/nodes');
+    const nodes = nodesData.items || [];
+    statNodes.textContent = nodes.length;
+
+    let ready = 0;
+    const rows = nodes.map(n => {
+      const nodeName = n.metadata.name;
+      const nodePods = allPods.filter(p => p.spec?.nodeName === nodeName);
+
+      const conditions = n.status?.conditions || [];
+      const readyCond = conditions.find(c => c.type === 'Ready');
+      const isReady = readyCond && readyCond.status === 'True';
+      if (isReady) ready++;
+      const statusPill = isReady ? pill('Ready', 'ok') : pill('NotReady', 'bad');
+
+      let cpuReq = 0, cpuLim = 0, memReq = 0, memLim = 0;
+      for (const p of nodePods) {
+        for (const c of p.spec?.containers || []) {
+          const req = c.resources?.requests || {};
+          const lim = c.resources?.limits || {};
+          cpuReq += parseCpu(req.cpu);
+          cpuLim += parseCpu(lim.cpu);
+          memReq += parseMem(req.memory);
+          memLim += parseMem(lim.memory);
+        }
+      }
+
+      const cpuCapacity = parseCpu(n.status?.capacity?.cpu);
+      const memCapacity = parseMem(n.status?.capacity?.memory);
+      const age = ageFrom(n.metadata.creationTimestamp);
+
+      return `<tr class="clickable" data-node="${nodeName}">
+        <td>${nodeName}</td>
+        <td>${statusPill}</td>
+        <td>${age}</td>
+        <td>${formatCpu(cpuReq)}${pctPill(cpuReq, cpuCapacity)}</td>
+        <td>${formatCpu(cpuLim)}${pctPill(cpuLim, cpuCapacity)}</td>
+        <td>${formatMem(memReq)}${pctPill(memReq, memCapacity)}</td>
+        <td>${formatMem(memLim)}${pctPill(memLim, memCapacity)}</td>
+        <td>${nodePods.length}</td>
+      </tr>`;
+    });
+
+    statNodesReady.textContent = `${ready}/${nodes.length}`;
+    nodeUsageTableBody.innerHTML = rows.length ? rows.join('') : '<tr><td class="empty" colspan="8">No nodes found</td></tr>';
+
+    nodeUsageTableBody.querySelectorAll('tr[data-node]').forEach(tr => {
+      tr.addEventListener('click', () => {
+        nodeSelect.value = tr.dataset.node;
+        loadNodeDetail();
+      });
+    });
+  }
+
+  async function loadNodeDetail() {
+    const nodeName = nodeSelect.value;
+    if (!nodeName) {
+      nodeSummaryRow.style.display = 'none';
+      allocationPanel.style.display = 'none';
+      nodePodsPanel.style.display = 'none';
+      return;
+    }
+
+    const node = await apiGet(`/api/v1/nodes/${nodeName}`);
+
+    const conditions = node.status?.conditions || [];
+    const readyCond = conditions.find(c => c.type === 'Ready');
+    const isReady = readyCond && readyCond.status === 'True';
+
+    const instanceType = node.metadata?.labels?.['node.kubernetes.io/instance-type']
+      || node.metadata?.labels?.['beta.kubernetes.io/instance-type'] || '–';
+
+    const cpuCapacity = parseCpu(node.status?.capacity?.cpu);
+    const memCapacity = parseMem(node.status?.capacity?.memory);
+    const cpuAllocatable = parseCpu(node.status?.allocatable?.cpu);
+    const memAllocatable = parseMem(node.status?.allocatable?.memory);
+    const podCapacity = node.status?.capacity?.pods || '–';
+
+    nodeSummaryRow.style.display = 'flex';
+    nodeStatusEl.innerHTML = isReady ? pill('Ready', 'ok') : pill('NotReady', 'bad');
+    nodeInstanceTypeEl.textContent = `${instanceType} · created ${ageFrom(node.metadata.creationTimestamp)} ago`;
+    nodeInstanceTypeEl.title = node.metadata.creationTimestamp ? new Date(node.metadata.creationTimestamp).toLocaleString() : '';
+    nodeCpuAllocatableEl.textContent = formatCpu(cpuAllocatable);
+    nodeCpuCapacityEl.textContent = `capacity: ${formatCpu(cpuCapacity)} (some reserved for system daemons)`;
+    nodeMemAllocatableEl.textContent = formatMem(memAllocatable);
+    nodeMemCapacityEl.textContent = `capacity: ${formatMem(memCapacity)} (some reserved for system daemons)`;
+
+    const podsData = await apiGet('/api/v1/pods');
+    const nodePods = (podsData.items || []).filter(p =>
+      p.spec?.nodeName === nodeName &&
+      p.status?.phase !== 'Succeeded' &&
+      p.status?.phase !== 'Failed'
+    );
+
+    nodePodCountEl.textContent = nodePods.length;
+    nodePodCapacityEl.textContent = `capacity: ${podCapacity} pods`;
+
+    const podMetrics = await fetchAllPodMetrics();
+    const nodeMetrics = await fetchNodeMetrics(nodeName);
+
+    let totalCpuReq = 0, totalCpuLim = 0, totalMemReq = 0, totalMemLim = 0;
+    const rows = nodePods.map(p => {
+      let cpuReq = 0, cpuLim = 0, memReq = 0, memLim = 0;
+      for (const c of p.spec?.containers || []) {
+        const req = c.resources?.requests || {};
+        const lim = c.resources?.limits || {};
+        cpuReq += parseCpu(req.cpu);
+        cpuLim += parseCpu(lim.cpu);
+        memReq += parseMem(req.memory);
+        memLim += parseMem(lim.memory);
+      }
+      totalCpuReq += cpuReq;
+      totalCpuLim += cpuLim;
+      totalMemReq += memReq;
+      totalMemLim += memLim;
+
+      const key = `${p.metadata.namespace}/${p.metadata.name}`;
+      const usage = podMetrics.get(key);
+      const cpuUsed = usage ? usage.cpu : null;
+      const memUsed = usage ? usage.mem : null;
+
+      return {
+        name: p.metadata.name,
+        namespace: p.metadata.namespace,
+        qos: p.status?.qosClass,
+        isApp: isAppPod(p.metadata.name),
+        cpuReq, cpuLim, cpuUsed,
+        memReq, memLim, memUsed,
+        cpuWaste: cpuUsed !== null ? Math.max(0, cpuReq - cpuUsed) : -1,
+        memWaste: memUsed !== null ? Math.max(0, memReq - memUsed) : -1,
+        restarts: podRestartCount(p),
+      };
+    });
+
+    const sortKey = sortSelect.value;
+    const sortFns = {
+      cpuUsed: (a, b) => (b.cpuUsed ?? -1) - (a.cpuUsed ?? -1),
+      memUsed: (a, b) => (b.memUsed ?? -1) - (a.memUsed ?? -1),
+      cpuReq: (a, b) => b.cpuReq - a.cpuReq,
+      memReq: (a, b) => b.memReq - a.memReq,
+      cpuWaste: (a, b) => b.cpuWaste - a.cpuWaste,
+      memWaste: (a, b) => b.memWaste - a.memWaste,
+    };
+    rows.sort(sortFns[sortKey] || sortFns.cpuUsed);
+
+    nodePodsPanel.style.display = 'block';
+
+    function sumGroup(group) {
+      return group.reduce((acc, r) => ({
+        count: acc.count + 1,
+        cpuReq: acc.cpuReq + r.cpuReq,
+        cpuLim: acc.cpuLim + r.cpuLim,
+        cpuUsed: acc.cpuUsed + (r.cpuUsed ?? 0),
+        memReq: acc.memReq + r.memReq,
+        memLim: acc.memLim + r.memLim,
+        memUsed: acc.memUsed + (r.memUsed ?? 0),
+        restarts: acc.restarts + r.restarts,
+      }), { count: 0, cpuReq: 0, cpuLim: 0, cpuUsed: 0, memReq: 0, memLim: 0, memUsed: 0, restarts: 0 });
+    }
+
+    function totalsRow(label, t, cssClass) {
+      return `<tr class="${cssClass}">
+        <td colspan="3"><strong>${label}</strong></td>
+        <td>${t.count} pod${t.count === 1 ? '' : 's'}</td>
+        <td>${formatCpu(t.cpuReq)}</td>
+        <td>${formatCpu(t.cpuLim)}</td>
+        <td>${metricsAvailable ? formatCpu(t.cpuUsed) : '–'}</td>
+        <td>${formatMem(t.memReq)}</td>
+        <td>${formatMem(t.memLim)}</td>
+        <td>${metricsAvailable ? formatMem(t.memUsed) : '–'}</td>
+        <td>${t.restarts}</td>
+      </tr>`;
+    }
+
+    let totalsHtml = '';
+    if (rows.length) {
+      const appRows = rows.filter(r => r.isApp);
+      const otherRows = rows.filter(r => !r.isApp);
+      const totalsRows = [];
+      if (appRows.length) totalsRows.push(totalsRow('Matching pod group total', sumGroup(appRows), 'subtotal-row'));
+      if (otherRows.length) totalsRows.push(totalsRow('All other pods total', sumGroup(otherRows), 'subtotal-row'));
+      totalsRows.push(totalsRow('All pods on this node', sumGroup(rows), 'grand-total-row'));
+      totalsHtml = totalsRows.join('');
+    }
+
+    const podRowsHtml = rows.length ? rows.map(r => `
+      <tr>
+        <td>${r.name}</td>
+        <td>${r.namespace}</td>
+        <td>${typePill(r.isApp)}</td>
+        <td>${qosPill(r.qos)}</td>
+        <td>${formatCpu(r.cpuReq)}</td>
+        <td>${formatCpu(r.cpuLim)}</td>
+        <td>${usageBar(r.cpuUsed, r.cpuReq)}</td>
+        <td>${formatMem(r.memReq)}</td>
+        <td>${formatMem(r.memLim)}</td>
+        <td>${usageBar(r.memUsed, r.memReq)}</td>
+        <td>${r.restarts}</td>
+      </tr>
+    `).join('') : '<tr><td class="empty" colspan="11">No pods on this node</td></tr>';
+
+    nodePodsTableBody.innerHTML = totalsHtml + podRowsHtml;
+
+    allocationPanel.style.display = 'block';
+    const usedCpuTotal = nodeMetrics ? nodeMetrics.cpu : rows.reduce((s, r) => s + (r.cpuUsed ?? 0), 0);
+    const usedMemTotal = nodeMetrics ? nodeMetrics.mem : rows.reduce((s, r) => s + (r.memUsed ?? 0), 0);
+    const haveUsage = metricsAvailable;
+
+    const cpuIdle = haveUsage ? Math.max(0, totalCpuReq - usedCpuTotal) : null;
+    const memIdle = haveUsage ? Math.max(0, totalMemReq - usedMemTotal) : null;
+
+    allocationTableBody.innerHTML = `
+      <tr>
+        <td><strong>CPU</strong></td>
+        <td>${formatCpu(totalCpuReq)}${pctPill(totalCpuReq, cpuAllocatable)}</td>
+        <td>${formatCpu(totalCpuLim)}${pctPill(totalCpuLim, cpuAllocatable)}</td>
+        <td>${haveUsage ? formatCpu(usedCpuTotal) + pctPill(usedCpuTotal, cpuAllocatable) : '<span style="color:var(--muted);">metrics-server unavailable</span>'}</td>
+        <td>${haveUsage ? `<span style="color:${cpuIdle / (totalCpuReq || 1) > 0.5 ? 'var(--warn)' : 'var(--text)'};">${formatCpu(cpuIdle)}</span> reserved but sitting idle` : '–'}</td>
+      </tr>
+      <tr>
+        <td><strong>Memory</strong></td>
+        <td>${formatMem(totalMemReq)}${pctPill(totalMemReq, memAllocatable)}</td>
+        <td>${formatMem(totalMemLim)}${pctPill(totalMemLim, memAllocatable)}</td>
+        <td>${haveUsage ? formatMem(usedMemTotal) + pctPill(usedMemTotal, memAllocatable) : '<span style="color:var(--muted);">metrics-server unavailable</span>'}</td>
+        <td>${haveUsage ? `<span style="color:${memIdle / (totalMemReq || 1) > 0.5 ? 'var(--warn)' : 'var(--text)'};">${formatMem(memIdle)}</span> reserved but sitting idle` : '–'}</td>
+      </tr>
+    `;
+  }
+
+  async function refreshNodesView() {
+    const podsData = await apiGet('/api/v1/pods');
+    const allPods = (podsData.items || []).filter(p => p.status?.phase !== 'Succeeded' && p.status?.phase !== 'Failed');
+    await loadNodeUsage(allPods);
+    if (nodeSelect.value) await loadNodeDetail();
+  }
+
+  nodeSelect.addEventListener('change', loadNodeDetail);
+  sortSelect.addEventListener('change', loadNodeDetail);
+  appPrefixEl.addEventListener('change', loadNodeDetail);
+
+  // =============================================================================
+  // Workloads view
+  // =============================================================================
+
+  const wlNsSelect = $('wl-ns-select');
+  const wlRefreshBtn = $('wl-refresh-btn');
+  const wlSubtabBtns = [...document.querySelectorAll('.subtab-btn')];
+  const wlSubviews = {
+    deployments: $('wl-subview-deployments'),
+    pods: $('wl-subview-pods'),
+    daemonsets: $('wl-subview-daemonsets'),
+    replicasets: $('wl-subview-replicasets'),
+  };
+  const wlDangerResultEl = $('wl-danger-result');
+  const wlSearchDeploymentsEl = $('wl-search-deployments');
+  const wlSearchPodsEl = $('wl-search-pods');
+  const wlSearchDaemonsetsEl = $('wl-search-daemonsets');
+  const wlSearchReplicasetsEl = $('wl-search-replicasets');
+  const wlNodeFilterBanner = $('wl-node-filter-banner');
+  const wlNodeFilterNameEl = $('wl-node-filter-name');
+  const wlNodeFilterClearBtn = $('wl-node-filter-clear');
+  const wlDeploymentFilterBanner = $('wl-deployment-filter-banner');
+  const wlDeploymentFilterNameEl = $('wl-deployment-filter-name');
+  const wlDeploymentFilterClearBtn = $('wl-deployment-filter-clear');
+  const wlDaemonsetFilterBanner = $('wl-daemonset-filter-banner');
+  const wlDaemonsetFilterNameEl = $('wl-daemonset-filter-name');
+  const wlDaemonsetFilterClearBtn = $('wl-daemonset-filter-clear');
+  const wlPodsNodeHeader = $('wl-pods-node-header');
+  const wlPodsNodeSortArrow = $('wl-pods-node-sort-arrow');
+  const wlPodsReadyHeader = $('wl-pods-ready-header');
+  const wlPodsReadySortArrow = $('wl-pods-ready-sort-arrow');
+  let wlPodsSortKey = 'node'; // 'node' | 'ready'
+  let wlPodsSortDir = 'asc';
+
+  function setWlPodsSort(key) {
+    wlPodsSortDir = (wlPodsSortKey === key && wlPodsSortDir === 'asc') ? 'desc' : 'asc';
+    wlPodsSortKey = key;
+    wlPodsNodeSortArrow.textContent = wlPodsSortKey === 'node' ? (wlPodsSortDir === 'asc' ? '▲' : '▼') : '';
+    wlPodsReadySortArrow.textContent = wlPodsSortKey === 'ready' ? (wlPodsSortDir === 'asc' ? '▲' : '▼') : '';
+    renderWlPods();
+  }
+
+  function switchWlSubview(name) {
+    wlSubtabBtns.forEach(b => b.classList.toggle('active', b.dataset.subtab === name));
+    Object.entries(wlSubviews).forEach(([key, el]) => el.classList.toggle('active', key === name));
+  }
+  wlSubtabBtns.forEach(b => b.addEventListener('click', () => switchWlSubview(b.dataset.subtab)));
+
+  const wlDeploymentsTableBody = document.querySelector('#wl-deployments-table tbody');
+  const wlPodsTableBody = document.querySelector('#wl-pods-table tbody');
+  const wlDaemonsetsTableBody = document.querySelector('#wl-daemonsets-table tbody');
+  const wlReplicasetsTableBody = document.querySelector('#wl-replicasets-table tbody');
+
+  // Raw API results, cached so search-as-you-type and the node filter can
+  // re-render instantly without re-fetching from the cluster on every keystroke.
+  let wlDeploymentsData = [];
+  let wlPodsData = [];
+  let wlDaemonsetsData = [];
+  let wlReplicasetsData = [];
+  let wlNodeFilter = null; // node name, or null when not filtering
+  let wlDeploymentFilter = null; // { uid, name }, or null when not filtering
+  let wlDaemonsetFilter = null; // { uid, name }, or null when not filtering
+
+  function wlDeleteBtn(kind, ns, name) {
+    if (!writeEnabled) return '<span class="pill muted">read-only</span>';
+    return `<button class="danger-btn small-btn wl-delete-btn" data-kind="${kind}" data-ns="${escapeHtml(ns)}" data-name="${escapeHtml(name)}">Delete</button>`;
+  }
+
+  function wlEmptyMessage(kindLabel) {
+    if (!wlNsSelect.value) return 'Pick a namespace above';
+    if (wlDeploymentFilter) return `No ${kindLabel} found for deployment "${escapeHtml(wlDeploymentFilter.name)}"`;
+    if (wlDaemonsetFilter) return `No ${kindLabel} found for daemonset "${escapeHtml(wlDaemonsetFilter.name)}"`;
+    if (wlNodeFilter) return `No ${kindLabel} found on node "${escapeHtml(wlNodeFilter)}"`;
+    return `No ${kindLabel} found`;
+  }
+
+  // Pods carry ownerReferences pointing at the ReplicaSet/DaemonSet that
+  // created them; used to trace "what's running on this node" up to the
+  // owning workloads (a ReplicaSet's own ownerReferences then points at its Deployment).
+  function ownerUidSet(pods, kind) {
+    const set = new Set();
+    for (const p of pods) {
+      for (const ref of p.metadata?.ownerReferences || []) {
+        if (ref.kind === kind) set.add(ref.uid);
+      }
+    }
+    return set;
+  }
+
+  function deploymentUidsOwning(rsUidSet) {
+    const set = new Set();
+    for (const rs of wlReplicasetsData) {
+      if (!rsUidSet.has(rs.metadata.uid)) continue;
+      for (const ref of rs.metadata?.ownerReferences || []) {
+        if (ref.kind === 'Deployment') set.add(ref.uid);
+      }
+    }
+    return set;
+  }
+
+  function wlNodeFilteredPods() {
+    return wlNodeFilter ? wlPodsData.filter(p => p.spec?.nodeName === wlNodeFilter) : null;
+  }
+
+  // Pods don't reference a Deployment directly — only the ReplicaSet that
+  // owns them, which in turn references the Deployment that owns it.
+  function wlDeploymentFilteredPods() {
+    if (!wlDeploymentFilter) return null;
+    const rsUids = new Set(
+      wlReplicasetsData
+        .filter(rs => (rs.metadata?.ownerReferences || []).some(ref => ref.kind === 'Deployment' && ref.uid === wlDeploymentFilter.uid))
+        .map(rs => rs.metadata.uid)
+    );
+    return wlPodsData.filter(p => (p.metadata?.ownerReferences || []).some(ref => ref.kind === 'ReplicaSet' && rsUids.has(ref.uid)));
+  }
+
+  // DaemonSet pods reference the DaemonSet directly (no intermediate ReplicaSet).
+  function wlDaemonsetFilteredPods() {
+    if (!wlDaemonsetFilter) return null;
+    return wlPodsData.filter(p => (p.metadata?.ownerReferences || []).some(ref => ref.kind === 'DaemonSet' && ref.uid === wlDaemonsetFilter.uid));
+  }
+
+  function renderWlDeployments() {
+    const term = wlSearchDeploymentsEl.value.trim().toLowerCase();
+    let items = wlDeploymentsData;
+    const nodePods = wlNodeFilteredPods();
+    if (nodePods) {
+      const deployUids = deploymentUidsOwning(ownerUidSet(nodePods, 'ReplicaSet'));
+      items = items.filter(d => deployUids.has(d.metadata.uid));
+    }
+    if (term) items = items.filter(d => d.metadata.name.toLowerCase().includes(term));
+    items = items.slice().sort((a, b) => a.metadata.name.localeCompare(b.metadata.name));
+
+    const rows = items.map(d => {
+      const st = d.status || {};
+      const nameCell = `<button class="wl-deployment-link" data-uid="${escapeHtml(d.metadata.uid)}" data-name="${escapeHtml(d.metadata.name)}" title="Show pods for this deployment">${escapeHtml(d.metadata.name)}</button>`;
+      return `<tr>
+        <td>${nameCell}</td>
+        <td>${st.readyReplicas || 0}/${st.replicas || 0}</td>
+        <td>${st.updatedReplicas || 0}</td>
+        <td>${st.availableReplicas || 0}</td>
+        <td>${ageFrom(d.metadata.creationTimestamp)}</td>
+        <td>${wlDeleteBtn('deployment', d.metadata.namespace, d.metadata.name)}</td>
+      </tr>`;
+    });
+    wlDeploymentsTableBody.innerHTML = rows.length ? rows.join('') : `<tr><td class="empty" colspan="6">${wlEmptyMessage('deployments')}</td></tr>`;
+  }
+
+  function renderWlPods() {
+    const term = wlSearchPodsEl.value.trim().toLowerCase();
+    let items = wlPodsData;
+    if (wlNodeFilter) items = items.filter(p => p.spec?.nodeName === wlNodeFilter);
+    if (wlDeploymentFilter) {
+      const depPodUids = new Set(wlDeploymentFilteredPods().map(p => p.metadata.uid));
+      items = items.filter(p => depPodUids.has(p.metadata.uid));
+    }
+    if (wlDaemonsetFilter) {
+      const dsPodUids = new Set(wlDaemonsetFilteredPods().map(p => p.metadata.uid));
+      items = items.filter(p => dsPodUids.has(p.metadata.uid));
+    }
+    if (term) items = items.filter(p => p.metadata.name.toLowerCase().includes(term));
+    // Sort by the selected column (Ready or Node), direction toggled by
+    // clicking that column's header; pod name breaks ties, always ascending.
+    const dirMul = wlPodsSortDir === 'asc' ? 1 : -1;
+    items = items.slice().sort((a, b) => {
+      if (wlPodsSortKey === 'ready') {
+        const ra = podReadyParts(a), rb = podReadyParts(b);
+        if (ra.total !== rb.total) return dirMul * (ra.total - rb.total);
+        if (ra.ready !== rb.ready) return dirMul * (ra.ready - rb.ready);
+        return a.metadata.name.localeCompare(b.metadata.name);
+      }
+      const na = a.spec?.nodeName || '';
+      const nb = b.spec?.nodeName || '';
+      if (!na && !nb) return a.metadata.name.localeCompare(b.metadata.name);
+      if (!na) return 1;
+      if (!nb) return -1;
+      return na === nb ? a.metadata.name.localeCompare(b.metadata.name) : dirMul * na.localeCompare(nb);
+    });
+
+    const rows = items.map(p => {
+      const restarts = podRestartCount(p);
+      const phase = p.status?.phase || 'Unknown';
+      let phaseKind = 'ok';
+      if (phase === 'Pending' || phase === 'Unknown') phaseKind = 'warn';
+      if (phase === 'Failed') phaseKind = 'bad';
+      const nodeName = p.spec?.nodeName;
+      const nodeCell = nodeName
+        ? `<button class="wl-node-link" data-node="${escapeHtml(nodeName)}" title="Show everything running on this node">${escapeHtml(nodeName)}</button>`
+        : '–';
+      const podCell = `<button class="wl-pod-link" data-ns="${escapeHtml(p.metadata.namespace)}" data-pod="${escapeHtml(p.metadata.name)}" title="Jump to Troubleshoot → Logs for this pod">${escapeHtml(p.metadata.name)}</button>`;
+      return `<tr>
+        <td>${podCell}</td>
+        <td>${podReadyCount(p)}</td>
+        <td>${pill(phase, phaseKind)}</td>
+        <td>${restarts}</td>
+        <td>${nodeCell}</td>
+        <td>${ageFrom(p.metadata.creationTimestamp)}</td>
+        <td>${wlDeleteBtn('pod', p.metadata.namespace, p.metadata.name)}</td>
+      </tr>`;
+    });
+    wlPodsTableBody.innerHTML = rows.length ? rows.join('') : `<tr><td class="empty" colspan="7">${wlEmptyMessage('pods')}</td></tr>`;
+  }
+
+  function renderWlDaemonsets() {
+    const term = wlSearchDaemonsetsEl.value.trim().toLowerCase();
+    let items = wlDaemonsetsData;
+    const nodePods = wlNodeFilteredPods();
+    if (nodePods) {
+      const dsUids = ownerUidSet(nodePods, 'DaemonSet');
+      items = items.filter(d => dsUids.has(d.metadata.uid));
+    }
+    if (term) items = items.filter(d => d.metadata.name.toLowerCase().includes(term));
+    items = items.slice().sort((a, b) => a.metadata.name.localeCompare(b.metadata.name));
+
+    const rows = items.map(d => {
+      const st = d.status || {};
+      const nameCell = `<button class="wl-daemonset-link" data-uid="${escapeHtml(d.metadata.uid)}" data-name="${escapeHtml(d.metadata.name)}" title="Show pods for this daemonset">${escapeHtml(d.metadata.name)}</button>`;
+      return `<tr>
+        <td>${nameCell}</td>
+        <td>${st.desiredNumberScheduled || 0}</td>
+        <td>${st.currentNumberScheduled || 0}</td>
+        <td>${st.numberReady || 0}</td>
+        <td>${st.numberAvailable || 0}</td>
+        <td>${ageFrom(d.metadata.creationTimestamp)}</td>
+        <td>${wlDeleteBtn('daemonset', d.metadata.namespace, d.metadata.name)}</td>
+      </tr>`;
+    });
+    wlDaemonsetsTableBody.innerHTML = rows.length ? rows.join('') : `<tr><td class="empty" colspan="7">${wlEmptyMessage('daemonsets')}</td></tr>`;
+  }
+
+  function renderWlReplicasets() {
+    const term = wlSearchReplicasetsEl.value.trim().toLowerCase();
+    let items = wlReplicasetsData;
+    const nodePods = wlNodeFilteredPods();
+    if (nodePods) {
+      const rsUids = ownerUidSet(nodePods, 'ReplicaSet');
+      items = items.filter(rs => rsUids.has(rs.metadata.uid));
+    }
+    if (term) items = items.filter(rs => rs.metadata.name.toLowerCase().includes(term));
+    items = items.slice().sort((a, b) => a.metadata.name.localeCompare(b.metadata.name));
+
+    const rows = items.map(rs => {
+      const st = rs.status || {};
+      return `<tr>
+        <td>${escapeHtml(rs.metadata.name)}</td>
+        <td>${rs.spec?.replicas || 0}</td>
+        <td>${st.replicas || 0}</td>
+        <td>${st.readyReplicas || 0}</td>
+        <td>${ageFrom(rs.metadata.creationTimestamp)}</td>
+      </tr>`;
+    });
+    wlReplicasetsTableBody.innerHTML = rows.length ? rows.join('') : `<tr><td class="empty" colspan="5">${wlEmptyMessage('replicasets')}</td></tr>`;
+  }
+
+  function renderWorkloadsView() {
+    renderWlDeployments();
+    renderWlPods();
+    renderWlDaemonsets();
+    renderWlReplicasets();
+  }
+
+  function setWlNodeFilter(nodeName) {
+    wlNodeFilter = nodeName;
+    if (nodeName) { wlDeploymentFilter = null; wlDaemonsetFilter = null; } // filters are mutually exclusive
+    wlNodeFilterBanner.classList.toggle('active', !!wlNodeFilter);
+    wlDeploymentFilterBanner.classList.toggle('active', !!wlDeploymentFilter);
+    wlDaemonsetFilterBanner.classList.toggle('active', !!wlDaemonsetFilter);
+    if (nodeName) wlNodeFilterNameEl.textContent = nodeName;
+    renderWorkloadsView();
+  }
+
+  function setWlDeploymentFilter(uid, name) {
+    wlDeploymentFilter = uid ? { uid, name } : null;
+    if (wlDeploymentFilter) { wlNodeFilter = null; wlDaemonsetFilter = null; } // filters are mutually exclusive
+    wlNodeFilterBanner.classList.toggle('active', !!wlNodeFilter);
+    wlDeploymentFilterBanner.classList.toggle('active', !!wlDeploymentFilter);
+    wlDaemonsetFilterBanner.classList.toggle('active', !!wlDaemonsetFilter);
+    if (wlDeploymentFilter) wlDeploymentFilterNameEl.textContent = wlDeploymentFilter.name;
+    renderWorkloadsView();
+  }
+
+  function setWlDaemonsetFilter(uid, name) {
+    wlDaemonsetFilter = uid ? { uid, name } : null;
+    if (wlDaemonsetFilter) { wlNodeFilter = null; wlDeploymentFilter = null; } // filters are mutually exclusive
+    wlNodeFilterBanner.classList.toggle('active', !!wlNodeFilter);
+    wlDeploymentFilterBanner.classList.toggle('active', !!wlDeploymentFilter);
+    wlDaemonsetFilterBanner.classList.toggle('active', !!wlDaemonsetFilter);
+    if (wlDaemonsetFilter) wlDaemonsetFilterNameEl.textContent = wlDaemonsetFilter.name;
+    renderWorkloadsView();
+  }
+
+  async function refreshWorkloadsView() {
+    const ns = wlNsSelect.value;
+    if (!ns) {
+      wlDeploymentsData = [];
+      wlPodsData = [];
+      wlDaemonsetsData = [];
+      wlReplicasetsData = [];
+      renderWorkloadsView();
+      return;
+    }
+    const [deploysData, podsData, daemonsetsData, replicasetsData] = await Promise.all([
+      apiGet(`/apis/apps/v1/namespaces/${ns}/deployments`),
+      apiGet(`/api/v1/namespaces/${ns}/pods`),
+      apiGet(`/apis/apps/v1/namespaces/${ns}/daemonsets`),
+      apiGet(`/apis/apps/v1/namespaces/${ns}/replicasets`),
+    ]);
+    wlDeploymentsData = deploysData.items || [];
+    wlPodsData = podsData.items || [];
+    wlDaemonsetsData = daemonsetsData.items || [];
+    wlReplicasetsData = replicasetsData.items || [];
+    renderWorkloadsView();
+  }
+
+  const WL_DELETE_PATH = {
+    pod: (ns, name) => `/api/v1/namespaces/${ns}/pods/${name}`,
+    deployment: (ns, name) => `/apis/apps/v1/namespaces/${ns}/deployments/${name}`,
+    daemonset: (ns, name) => `/apis/apps/v1/namespaces/${ns}/daemonsets/${name}`,
+  };
+
+  $('view-workloads').addEventListener('click', async (e) => {
+    const nodeLink = e.target.closest('.wl-node-link');
+    if (nodeLink) {
+      setWlNodeFilter(nodeLink.dataset.node);
+      return;
+    }
+
+    const podLink = e.target.closest('.wl-pod-link');
+    if (podLink) {
+      await goToPodLogs(podLink.dataset.ns, podLink.dataset.pod);
+      return;
+    }
+
+    const deploymentLink = e.target.closest('.wl-deployment-link');
+    if (deploymentLink) {
+      setWlDeploymentFilter(deploymentLink.dataset.uid, deploymentLink.dataset.name);
+      switchWlSubview('pods');
+      return;
+    }
+
+    const daemonsetLink = e.target.closest('.wl-daemonset-link');
+    if (daemonsetLink) {
+      setWlDaemonsetFilter(daemonsetLink.dataset.uid, daemonsetLink.dataset.name);
+      switchWlSubview('pods');
+      return;
+    }
+
+    const btn = e.target.closest('.wl-delete-btn');
+    if (!btn) return;
+    const { kind, ns, name } = btn.dataset;
+    if (!confirm(`Really delete ${kind} "${name}" in namespace "${ns}"? This cannot be undone from here.`)) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch(`${proxyUrl()}${WL_DELETE_PATH[kind](ns, name)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      wlDangerResultEl.textContent = `Deleted ${kind} "${name}" in namespace "${ns}".`;
+      wlDangerResultEl.className = 'danger-result ok';
+      await refreshWorkloadsView();
+    } catch (err) {
+      wlDangerResultEl.textContent = `Failed to delete ${kind} "${name}": ${err.message}`;
+      wlDangerResultEl.className = 'danger-result bad';
+      btn.disabled = false;
+    }
+  });
+
+  wlSearchDeploymentsEl.addEventListener('input', renderWlDeployments);
+  wlSearchPodsEl.addEventListener('input', renderWlPods);
+  wlSearchDaemonsetsEl.addEventListener('input', renderWlDaemonsets);
+  wlSearchReplicasetsEl.addEventListener('input', renderWlReplicasets);
+  wlNodeFilterClearBtn.addEventListener('click', () => setWlNodeFilter(null));
+  wlDeploymentFilterClearBtn.addEventListener('click', () => setWlDeploymentFilter(null, null));
+  wlDaemonsetFilterClearBtn.addEventListener('click', () => setWlDaemonsetFilter(null, null));
+
+  wlPodsNodeHeader.addEventListener('click', () => setWlPodsSort('node'));
+  wlPodsReadyHeader.addEventListener('click', () => setWlPodsSort('ready'));
+
+  wlNsSelect.addEventListener('change', () => { setWlNodeFilter(null); setWlDeploymentFilter(null, null); setWlDaemonsetFilter(null, null); refreshWorkloadsView(); });
+  wlRefreshBtn.addEventListener('click', refreshWorkloadsView);
+
+  // =============================================================================
+  // Troubleshoot view
+  // =============================================================================
+
+  const tsNsSelect = $('ts-ns-select');
+  const tsFilterEl = $('ts-filter');
+  const tsWorkloadSelect = $('ts-workload-select');
+  const tsPodSelect = $('ts-pod-select');
+  const tsContainerSelect = $('ts-container-select');
+  const tsRefreshBtn = $('ts-refresh-btn');
+
+  const cmdGetPodsEl = $('cmd-get-pods');
+  const cmdDescribeWorkloadEl = $('cmd-describe-workload');
+  const cmdDescribePodEl = $('cmd-describe-pod');
+  const cmdLogsEl = $('cmd-logs');
+  const cmdDeleteWorkloadEl = $('cmd-delete-workload');
+  const cmdDeletePodEl = $('cmd-delete-pod');
+
+  const describeWorkloadBtn = $('describe-workload-btn');
+  const describeWorkloadOutput = $('describe-workload-output');
+  const describePodBtn = $('describe-pod-btn');
+  const describePodOutput = $('describe-pod-output');
+
+  const dangerWorkloadKindEl = $('danger-workload-kind');
+  const dangerWorkloadNameEl = $('danger-workload-name');
+  const dangerWorkloadNsEl = $('danger-workload-ns');
+  const deleteWorkloadBtn = $('delete-workload-btn');
+  const dangerPodNameEl = $('danger-pod-name');
+  const dangerPodNsEl = $('danger-pod-ns');
+  const deletePodBtn = $('delete-pod-btn');
+  const tsDangerResultEl = $('ts-danger-result');
+
+  let tsWorkloads = [];
+  let tsAllPods = []; // every pod in the selected namespace, unfiltered
+  let tsPods = [];    // pods currently shown in the dropdown (see populateTsPodSelect)
+
+  const tsPodsTableBody = document.querySelector('#ts-pods-table tbody');
+
+  function renderTsPodsTable() {
+    const rows = tsPods.map(p => {
+      const restarts = podRestartCount(p);
+      const phase = p.status?.phase || 'Unknown';
+      let phaseKind = 'ok';
+      if (phase === 'Pending' || phase === 'Unknown') phaseKind = 'warn';
+      if (phase === 'Failed') phaseKind = 'bad';
+      let restartClass = '';
+      if (restarts >= 10) restartClass = 'restart-crit';
+      else if (restarts >= 3) restartClass = 'restart-hi';
+      const age = ageFrom(p.metadata.creationTimestamp);
+      const exitReason = podLastExitReason(p);
+      const exitTitle = escapeHtml(exitReason?.detail || 'Click row for full pod detail (events, container state, describe output)');
+      const exitCell = exitReason
+        ? `<span style="color: var(--${exitReason.bad ? 'bad' : 'muted'});" title="${exitTitle}">${exitReason.text}</span>`
+        : '–';
+      return `<tr class="clickable" data-pod="${escapeHtml(p.metadata.name)}" title="Click for full pod detail below">
+        <td>${p.metadata.name}</td>
+        <td>${podReadyCount(p)}</td>
+        <td>${pill(phase, phaseKind)}</td>
+        <td class="${restartClass}">${restarts}</td>
+        <td>${exitCell}</td>
+        <td>${p.spec?.nodeName || '–'}</td>
+        <td>${age}</td>
+      </tr>`;
+    });
+    tsPodsTableBody.innerHTML = rows.length ? rows.join('') : '<tr><td class="empty" colspan="7">No pods found</td></tr>';
+
+    tsPodsTableBody.querySelectorAll('tr[data-pod]').forEach(tr => {
+      tr.addEventListener('click', () => {
+        tsPodSelect.value = tr.dataset.pod;
+        populateTsContainerSelect();
+        updateTsCommandsAndDangerZone();
+        describeSelectedPod();
+        describePodOutput.closest('.panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+  }
+
+  const tsPodsPerNodeEl = $('ts-pods-per-node');
+
+  function renderPodsPerNode() {
+    if (!tsPods.length) {
+      tsPodsPerNodeEl.innerHTML = '<div class="empty">No pods found</div>';
+      return;
+    }
+
+    const counts = new Map();
+    for (const p of tsPods) {
+      const node = p.spec?.nodeName || '(unscheduled)';
+      counts.set(node, (counts.get(node) || 0) + 1);
+    }
+
+    // Color is assigned by the node's position in a name-sorted list, not by
+    // its pod-count rank — so a slice's color stays stable across refreshes
+    // even as counts (and therefore rank) shift.
+    const nodesByName = [...counts.keys()].sort();
+    const SERIES_SLOTS = 7;
+    function colorForNode(name) {
+      const idx = nodesByName.indexOf(name);
+      return `var(--series-${(idx % SERIES_SLOTS) + 1})`;
+    }
+
+    let entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+
+    // Series-count ladder: past 7 real slices, fold the tail into "Other"
+    // rather than generate more hues (a generated 9th hue would be
+    // indistinguishable from an existing one under CVD).
+    const MAX_SLICES = 7;
+    let otherCount = 0;
+    if (entries.length > MAX_SLICES) {
+      const head = entries.slice(0, MAX_SLICES);
+      otherCount = entries.slice(MAX_SLICES).length;
+      const tailTotal = entries.slice(MAX_SLICES).reduce((sum, [, c]) => sum + c, 0);
+      entries = [...head, [`Other (${otherCount} more node${otherCount === 1 ? '' : 's'})`, tailTotal]];
+    }
+
+    const total = tsPods.length;
+    const cx = 90, cy = 90, r = 80;
+
+    function polarToCartesian(angleDeg) {
+      const rad = (angleDeg - 90) * Math.PI / 180;
+      return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+    }
+
+    let angle = 0;
+    const slices = entries.map(([node, count], i) => {
+      const pct = count / total;
+      const startAngle = angle;
+      const endAngle = angle + pct * 360;
+      angle = endAngle;
+
+      const isOther = otherCount > 0 && i === entries.length - 1;
+      const color = isOther ? 'var(--muted)' : colorForNode(node);
+
+      let d;
+      if (pct >= 0.9999) {
+        // A single full-circle slice: an arc command degenerates when start === end.
+        d = `M ${cx},${cy - r} A ${r},${r} 0 1 1 ${(cx - 0.01).toFixed(2)},${cy - r} Z`;
+      } else {
+        const p1 = polarToCartesian(startAngle);
+        const p2 = polarToCartesian(endAngle);
+        const largeArc = endAngle - startAngle > 180 ? 1 : 0;
+        d = `M ${cx},${cy} L ${p1.x.toFixed(2)},${p1.y.toFixed(2)} A ${r},${r} 0 ${largeArc} 1 ${p2.x.toFixed(2)},${p2.y.toFixed(2)} Z`;
+      }
+
+      return { node, count, pct, color, d };
+    });
+
+    const pieHtml = `<svg width="180" height="180" viewBox="0 0 180 180" role="img" aria-label="Pods per node" style="flex-shrink:0;">
+      ${slices.map(s => `<path d="${s.d}" fill="${s.color}" stroke="var(--panel)" stroke-width="2"><title>${escapeHtml(s.node)}: ${s.count} pod${s.count === 1 ? '' : 's'} (${Math.round(s.pct * 100)}%)</title></path>`).join('')}
+    </svg>`;
+
+    const legendHtml = `<div style="display:flex;flex-direction:column;gap:6px;min-width:0;">
+      ${slices.map(s => `<div style="display:flex;align-items:center;gap:8px;font-size:13px;">
+        <span style="width:10px;height:10px;border-radius:2px;background:${s.color};flex-shrink:0;"></span>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px;color:var(--text);" title="${escapeHtml(s.node)}">${escapeHtml(s.node)}</span>
+        <span style="color:var(--muted);flex-shrink:0;">${s.count} pod${s.count === 1 ? '' : 's'} · ${Math.round(s.pct * 100)}%</span>
+      </div>`).join('')}
+    </div>`;
+
+    const summary = `<div style="color:var(--muted);font-size:12px;margin-bottom:10px;text-align:center;">${counts.size} node${counts.size === 1 ? '' : 's'} · ${total} pod${total === 1 ? '' : 's'}</div>`;
+
+    tsPodsPerNodeEl.innerHTML = summary +
+      `<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;justify-content:center;">${pieHtml}${legendHtml}</div>`;
+  }
+
+  function tsKeyword() {
+    return (tsFilterEl.value || '').trim().toLowerCase();
+  }
+
+  function workloadSelector(workload) {
+    const labels = workload?.spec?.selector?.matchLabels || {};
+    return Object.entries(labels).map(([k, v]) => `${k}=${v}`).join(',');
+  }
+
+  function workloadKey(workload) {
+    return `${workload.kind}/${workload.metadata.name}`;
+  }
+
+  // Deployments and DaemonSets are both common application workload types, so
+  // fetch both kinds and merge them into one relationship-aware list.
+  async function loadTsWorkloads(namespace) {
+    const [deploysData, daemonsetsData] = await Promise.all([
+      apiGet(`/apis/apps/v1/namespaces/${namespace}/deployments`),
+      apiGet(`/apis/apps/v1/namespaces/${namespace}/daemonsets`),
+    ]);
+    const deploys = (deploysData.items || []).map(d => ({ ...d, kind: 'Deployment' }));
+    const daemonsets = (daemonsetsData.items || []).map(d => ({ ...d, kind: 'DaemonSet' }));
+    const keyword = tsKeyword();
+    tsWorkloads = [...deploys, ...daemonsets]
+      .filter(w => !keyword || w.metadata.name.toLowerCase().includes(keyword))
+      .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name));
+
+    const prev = tsWorkloadSelect.value;
+    tsWorkloadSelect.innerHTML = tsWorkloads.length
+      ? '<option value="">Select workload…</option>' + tsWorkloads.map(w => `<option value="${escapeHtml(workloadKey(w))}">${escapeHtml(w.metadata.name)} (${w.kind})</option>`).join('')
+      : `<option value="">No workloads match "${escapeHtml(keyword)}"</option>`;
+    if (tsWorkloads.some(w => workloadKey(w) === prev)) tsWorkloadSelect.value = prev;
+  }
+
+  async function loadTsPods(namespace) {
+    const data = await apiGet(`/api/v1/namespaces/${namespace}/pods`);
+    tsAllPods = data.items || [];
+    populateTsPodSelect();
+    populateEventsPodSelect();
+  }
+
+  function podMatchesSelector(pod, selectorLabels) {
+    const keys = Object.keys(selectorLabels || {});
+    if (!keys.length) return false;
+    const labels = pod.metadata?.labels || {};
+    return keys.every(k => labels[k] === selectorLabels[k]);
+  }
+
+  // Once a workload is selected, the pod dropdown shows ONLY pods matching
+  // that workload's selector — not every pod in the namespace. Keyword
+  // filtering only applies when no workload is picked yet.
+  function populateTsPodSelect() {
+    const workload = tsWorkloads.find(w => workloadKey(w) === tsWorkloadSelect.value);
+    let emptyMessage;
+    if (workload) {
+      const selectorLabels = workload.spec?.selector?.matchLabels || {};
+      tsPods = tsAllPods.filter(p => podMatchesSelector(p, selectorLabels));
+      emptyMessage = `No pods match ${workload.kind.toLowerCase()} "${workload.metadata.name}"'s selector`;
+    } else {
+      const keyword = tsKeyword();
+      tsPods = tsAllPods.filter(p => !keyword || p.metadata.name.toLowerCase().includes(keyword));
+      emptyMessage = `No pods match "${keyword}"`;
+    }
+
+    const prev = tsPodSelect.value;
+    tsPodSelect.innerHTML = tsPods.length
+      ? '<option value="">Select pod…</option>' + tsPods.map(p => `<option value="${p.metadata.name}">${p.metadata.name}</option>`).join('')
+      : `<option value="">${escapeHtml(emptyMessage)}</option>`;
+    if (tsPods.some(p => p.metadata.name === prev)) tsPodSelect.value = prev;
+    renderTsPodsTable();
+    renderPodsPerNode();
+    populateTsContainerSelect();
+  }
+
+  function populateTsContainerSelect() {
+    const pod = tsPods.find(p => p.metadata.name === tsPodSelect.value);
+    const containers = (pod?.spec?.containers || []).map(c => c.name);
+    tsContainerSelect.innerHTML = containers.length
+      ? containers.map(c => `<option value="${c}">${c}</option>`).join('')
+      : '<option value="">–</option>';
+  }
+
+  function updateTsCommandsAndDangerZone() {
+    const ns = tsNsSelect.value;
+    const workload = tsWorkloads.find(w => workloadKey(w) === tsWorkloadSelect.value);
+    const podName = tsPodSelect.value;
+    const container = tsContainerSelect.value;
+
+    cmdGetPodsEl.textContent = (ns && workload)
+      ? `kubectl get pods -n ${ns} -l ${workloadSelector(workload)} -o wide`
+      : ns ? `kubectl get pods -n ${ns} -o wide` : 'pick a namespace';
+
+    cmdDescribeWorkloadEl.textContent = (ns && workload)
+      ? `kubectl describe ${workload.kind.toLowerCase()} ${workload.metadata.name} -n ${ns}`
+      : 'pick a workload';
+
+    cmdDescribePodEl.textContent = (ns && podName)
+      ? `kubectl -n ${ns} describe pod ${podName}`
+      : 'pick a pod';
+
+    cmdLogsEl.textContent = (ns && podName && container)
+      ? `kubectl logs -n ${ns} ${podName} -c ${container} --tail=100`
+      : (ns && podName) ? `kubectl logs -n ${ns} ${podName} --tail=100` : 'pick a pod and container';
+
+    cmdDeleteWorkloadEl.textContent = (ns && workload)
+      ? `kubectl delete ${workload.kind.toLowerCase()} ${workload.metadata.name} -n ${ns}`
+      : 'pick a workload';
+
+    cmdDeletePodEl.textContent = (ns && podName)
+      ? `kubectl delete pod ${podName} -n ${ns}`
+      : 'pick a pod';
+
+    dangerWorkloadKindEl.textContent = workload ? workload.kind.toLowerCase() : 'workload';
+    dangerWorkloadNameEl.textContent = workload ? workload.metadata.name : '–';
+    dangerWorkloadNsEl.textContent = workload ? ns : '–';
+    dangerPodNameEl.textContent = podName || '–';
+    dangerPodNsEl.textContent = podName ? ns : '–';
+    deleteWorkloadBtn.disabled = !writeEnabled || !workload;
+    deletePodBtn.disabled = !writeEnabled || !podName;
+  }
+
+  async function refreshTroubleshootView() {
+    const namespace = tsNsSelect.value;
+    if (!namespace) { updateTsCommandsAndDangerZone(); return; }
+    // Sequential, not parallel: populateTsPodSelect() (inside loadTsPods) looks
+    // up the selected workload in tsWorkloads, so workloads must finish
+    // loading first or pod filtering would run against a stale/empty list.
+    await loadTsWorkloads(namespace);
+    await loadTsPods(namespace);
+    await loadEvents(namespace);
+    updateTsCommandsAndDangerZone();
+  }
+
+  // Jumps from a pod link elsewhere (e.g. Workloads → Pods) to Troubleshoot,
+  // selecting that pod/namespace and immediately streaming its logs.
+  async function goToPodLogs(namespace, podName) {
+    tsNsSelect.value = namespace;
+    switchView('troubleshoot');
+    await refreshTroubleshootView();
+    tsPodSelect.value = podName;
+    populateTsContainerSelect();
+    updateTsCommandsAndDangerZone();
+    describeSelectedPod();
+
+    resetLogView();
+    logBox.textContent = 'Loading…';
+    await loadLogsOnce();
+    if (liveTailToggle.checked) {
+      pauseBtn.disabled = false;
+      logTimer = setInterval(pollLogs, 3000);
+    }
+
+    logBox.closest('.panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function formatConditions(conditions) {
+    if (!conditions || !conditions.length) return '  (none)';
+    return conditions.map(c => `  ${c.type}\t${c.status}\t${c.reason || ''}\t${c.message || ''}`).join('\n');
+  }
+
+  async function describeEventsText(namespace, name) {
+    try {
+      const data = await apiGet(`/api/v1/namespaces/${namespace}/events?fieldSelector=${encodeURIComponent(`involvedObject.name=${name}`)}`);
+      const events = (data.items || []).slice().sort((a, b) => {
+        const ta = new Date(a.lastTimestamp || a.eventTime || a.metadata.creationTimestamp).getTime();
+        const tb = new Date(b.lastTimestamp || b.eventTime || b.metadata.creationTimestamp).getTime();
+        return ta - tb;
+      });
+      if (!events.length) return '  (no events found for this exact object name)';
+      return events.map(e => `  ${ageFrom(e.lastTimestamp || e.eventTime || e.metadata.creationTimestamp)} ago\t${e.type}\t${e.reason}\t${e.message}`).join('\n');
+    } catch (err) {
+      return `  (failed to load events: ${err.message})`;
+    }
+  }
+
+  describeWorkloadBtn.addEventListener('click', async () => {
+    const ns = tsNsSelect.value;
+    const workload = tsWorkloads.find(w => workloadKey(w) === tsWorkloadSelect.value);
+    if (!ns || !workload) { describeWorkloadOutput.textContent = 'Pick a namespace and workload first.'; return; }
+    describeWorkloadOutput.textContent = 'Loading…';
+    try {
+      const path = workload.kind === 'DaemonSet'
+        ? `/apis/apps/v1/namespaces/${ns}/daemonsets/${workload.metadata.name}`
+        : `/apis/apps/v1/namespaces/${ns}/deployments/${workload.metadata.name}`;
+      const d = await apiGet(path);
+      const s = d.spec || {}, st = d.status || {};
+      const containers = s.template?.spec?.containers || [];
+      const containerText = containers.map(c => {
+        const req = c.resources?.requests || {}, lim = c.resources?.limits || {};
+        return `  - ${c.name}\n      Image: ${c.image}\n      Requests: cpu=${req.cpu || '–'} memory=${req.memory || '–'}\n      Limits:   cpu=${lim.cpu || '–'} memory=${lim.memory || '–'}`;
+      }).join('\n') || '  (none)';
+      const eventsText = await describeEventsText(ns, d.metadata.name);
+      const statusLine = workload.kind === 'DaemonSet'
+        ? `Desired Scheduled:   ${st.desiredNumberScheduled ?? 0} | Current: ${st.currentNumberScheduled ?? 0} | Ready: ${st.numberReady ?? 0} | Available: ${st.numberAvailable ?? 0} | Updated: ${st.updatedNumberScheduled ?? 0}`
+        : `Replicas:            ${st.replicas || 0} desired | ${st.updatedReplicas || 0} updated | ${st.readyReplicas || 0} ready | ${st.availableReplicas || 0} available`;
+      const strategyLine = workload.kind === 'DaemonSet'
+        ? `UpdateStrategy:      ${s.updateStrategy?.type || '–'}`
+        : `StrategyType:        ${s.strategy?.type || '–'}`;
+      describeWorkloadOutput.textContent = [
+        `Kind:                ${workload.kind}`,
+        `Name:                ${d.metadata.name}`,
+        `Namespace:           ${d.metadata.namespace}`,
+        `Labels:              ${Object.entries(d.metadata.labels || {}).map(([k, v]) => `${k}=${v}`).join(', ') || '(none)'}`,
+        `Selector:            ${workloadSelector(d) || '(none)'}`,
+        statusLine,
+        strategyLine,
+        ``,
+        `Conditions:`,
+        formatConditions(st.conditions),
+        ``,
+        `Pod Template Containers:`,
+        containerText,
+        ``,
+        `Events (by object name, oldest first):`,
+        eventsText,
+      ].join('\n');
+    } catch (err) {
+      describeWorkloadOutput.textContent = `Error: ${err.message}`;
+    }
+  });
+
+  async function describeSelectedPod() {
+    const ns = tsNsSelect.value;
+    const name = tsPodSelect.value;
+    if (!ns || !name) { describePodOutput.textContent = 'Pick a namespace and pod first.'; return; }
+    describePodOutput.textContent = 'Loading…';
+    try {
+      const p = await apiGet(`/api/v1/namespaces/${ns}/pods/${name}`);
+      const statuses = p.status?.containerStatuses || [];
+      const containerText = statuses.map(cs => {
+        const state = cs.state?.running ? `Running (started ${cs.state.running.startedAt || '–'})`
+          : cs.state?.waiting ? `Waiting (${cs.state.waiting.reason}${cs.state.waiting.message ? ': ' + cs.state.waiting.message : ''})`
+          : cs.state?.terminated ? `Terminated (${cs.state.terminated.reason}, exit ${cs.state.terminated.exitCode}${cs.state.terminated.message ? ' — ' + cs.state.terminated.message : ''})`
+          : 'Unknown';
+        const lastTerm = cs.lastState?.terminated;
+        const lastStateText = lastTerm
+          ? `\n      Last State: Terminated (${lastTerm.reason}, exit ${lastTerm.exitCode})` +
+            (lastTerm.message ? `\n        Message:  ${lastTerm.message}` : '') +
+            `\n        Started:  ${lastTerm.startedAt || '–'}` +
+            `\n        Finished: ${lastTerm.finishedAt || '–'}`
+          : '';
+        return `  - ${cs.name}\n      Image: ${cs.image}\n      State: ${state}\n      Ready: ${cs.ready}\n      Restart Count: ${cs.restartCount}${lastStateText}`;
+      }).join('\n') || '  (none)';
+      const eventsText = await describeEventsText(ns, name);
+      describePodOutput.textContent = [
+        `Name:                ${p.metadata.name}`,
+        `Namespace:           ${p.metadata.namespace}`,
+        `Node:                ${p.spec?.nodeName || '–'}`,
+        `Pod IP:              ${p.status?.podIP || '–'}`,
+        `Phase:               ${p.status?.phase || '–'}`,
+        `QoS Class:           ${p.status?.qosClass || '–'}`,
+        ``,
+        `Conditions:`,
+        formatConditions(p.status?.conditions),
+        ``,
+        `Containers:`,
+        containerText,
+        ``,
+        `Events (by object name, oldest first):`,
+        eventsText,
+      ].join('\n');
+    } catch (err) {
+      describePodOutput.textContent = `Error: ${err.message}`;
+    }
+  }
+
+  describePodBtn.addEventListener('click', describeSelectedPod);
+
+  function showDangerResult(ok, message) {
+    tsDangerResultEl.textContent = message;
+    tsDangerResultEl.className = `danger-result ${ok ? 'ok' : 'bad'}`;
+  }
+
+  deleteWorkloadBtn.addEventListener('click', async () => {
+    if (!writeEnabled) { showDangerResult(false, 'Write actions are disabled. Restart the local tool with --write to enable them.'); return; }
+    const ns = tsNsSelect.value;
+    const workload = tsWorkloads.find(w => workloadKey(w) === tsWorkloadSelect.value);
+    if (!ns || !workload) return;
+    const kind = workload.kind.toLowerCase();
+    if (!confirm(`Really delete ${kind} "${workload.metadata.name}" in namespace "${ns}"? This cannot be undone from here.`)) return;
+    deleteWorkloadBtn.disabled = true;
+    try {
+      const path = workload.kind === 'DaemonSet'
+        ? `/apis/apps/v1/namespaces/${ns}/daemonsets/${workload.metadata.name}`
+        : `/apis/apps/v1/namespaces/${ns}/deployments/${workload.metadata.name}`;
+      const res = await fetch(`${proxyUrl()}${path}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      showDangerResult(true, `Deleted ${kind} "${workload.metadata.name}" in namespace "${ns}".`);
+      await refreshTroubleshootView();
+    } catch (err) {
+      showDangerResult(false, `Failed to delete ${kind}: ${err.message}`);
+    }
+  });
+
+  deletePodBtn.addEventListener('click', async () => {
+    if (!writeEnabled) { showDangerResult(false, 'Write actions are disabled. Restart the local tool with --write to enable them.'); return; }
+    const ns = tsNsSelect.value;
+    const name = tsPodSelect.value;
+    if (!ns || !name) return;
+    if (!confirm(`Really delete pod "${name}" in namespace "${ns}"? This cannot be undone from here.`)) return;
+    deletePodBtn.disabled = true;
+    try {
+      const res = await fetch(`${proxyUrl()}/api/v1/namespaces/${ns}/pods/${name}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      showDangerResult(true, `Deleted pod "${name}" in namespace "${ns}".`);
+      await refreshTroubleshootView();
+    } catch (err) {
+      showDangerResult(false, `Failed to delete pod: ${err.message}`);
+    }
+  });
+
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = document.getElementById(btn.dataset.target);
+      if (!target || !navigator.clipboard) return;
+      navigator.clipboard.writeText(target.textContent).then(() => {
+        const original = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = original; }, 1200);
+      }).catch(() => {});
+    });
+  });
+
+  tsNsSelect.addEventListener('change', refreshTroubleshootView);
+  tsFilterEl.addEventListener('change', refreshTroubleshootView);
+  tsWorkloadSelect.addEventListener('change', () => {
+    populateTsPodSelect();
+    updateTsCommandsAndDangerZone();
+  });
+  tsPodSelect.addEventListener('change', () => { populateTsContainerSelect(); updateTsCommandsAndDangerZone(); });
+  tsContainerSelect.addEventListener('change', updateTsCommandsAndDangerZone);
+  tsRefreshBtn.addEventListener('click', refreshTroubleshootView);
+
+  // =============================================================================
+  // Shared refresh orchestration
+  // =============================================================================
+
+  let refreshTimer = null;
+
+  async function refreshActive() {
+    try {
+      if (currentView === 'nodes') await refreshNodesView();
+      else if (currentView === 'workloads') await refreshWorkloadsView();
+      else await refreshTroubleshootView();
+      setConnected(true, `${activeContext || 'cluster'} · last refresh ${new Date().toLocaleTimeString()}`);
+    } catch (err) {
+      setConnected(false, `error: ${err.message}`);
+    }
+  }
+
+  function restartAutoRefresh() {
+    if (refreshTimer) clearInterval(refreshTimer);
+    if (autoRefreshEl.checked) {
+      const interval = currentView === 'workloads' ? 3000 : 10000;
+      refreshTimer = setInterval(refreshActive, interval);
+    }
+  }
+
+  connectBtn.addEventListener('click', async () => {
+    try {
+      const config = await loadProductConfig();
+      await Promise.all([loadNamespaces(), probeMetrics().then(loadNodeList)]);
+      connected = true;
+      setConnected(true, `${config.context || 'cluster'} · ${writeEnabled ? 'write enabled' : 'read-only'}`);
+      await refreshActive();
+      restartAutoRefresh();
+    } catch (err) {
+      setConnected(false, `error: ${err.message}`);
+    }
+  });
+
+  refreshBtn.addEventListener('click', refreshActive);
+  autoRefreshEl.addEventListener('change', restartAutoRefresh);
+
+  if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+    connectBtn.click();
+  }
+
+})();
+</script>
+</body>
+</html>
