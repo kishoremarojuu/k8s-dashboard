@@ -110,10 +110,15 @@ incremental migration mechanism, not the long-term frontend contract.
 ## Development
 
 ```bash
+cd kube-troubleshooter
+cp ../k8s-dashboard.html k8s-dashboard.html
 go test ./...
 go build ./...
 go run . --no-open
 ```
+
+The copied HTML file is ignored by Git. Running the root `./start.sh` performs
+the synchronization automatically before compiling the embedded dashboard.
 
 The legacy `log_file_server.py` remains in the repository temporarily for
 comparison, but the new launcher does not use Python or `kubectl proxy`.
